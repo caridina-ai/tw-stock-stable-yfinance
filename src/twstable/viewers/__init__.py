@@ -1,0 +1,1 @@
+"""Matplotlib GUI viewers."""

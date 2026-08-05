@@ -1,0 +1,786 @@
+<!--
+  Report template. `twstable report` fills __DATA__ and assembles this into
+  either a standalone document (docs/index.html) or a body-only fragment for a
+  hosted artifact. The three HEAD/BODY/SCRIPT markers below are the seams the
+  builder splits on -- keep them.
+-->
+<!--HEAD-->
+<title>長期穩定上漲股策略 — 二十年 Walk-Forward 實測</title>
+
+<style>
+  /* ── tokens ──────────────────────────────────────────────────────────
+     Neutrals are the validated chart surfaces: a hair warm, never a flat
+     mid-grey. Series hues are categorical slots 1 & 2, validated for CVD
+     against both surfaces. */
+  :root {
+    color-scheme: light;
+    --plane:      #f9f9f7;
+    --surface:    #fcfcfb;
+    --ink:        #0b0b0b;
+    --ink-2:      #52514e;
+    --muted:      #898781;
+    --grid:       #e1e0d9;
+    --axis:       #c3c2b7;
+    --hairline:   rgba(11, 11, 11, 0.10);
+    --s1:         #2a78d6;
+    --s2:         #eb6834;
+    --good:       #006300;
+    --bad:        #d03b3b;
+    --tip-bg:     rgba(252, 252, 251, 0.97);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plane:    #0d0d0d;
+      --surface:  #1a1a19;
+      --ink:      #ffffff;
+      --ink-2:    #c3c2b7;
+      --muted:    #898781;
+      --grid:     #2c2c2a;
+      --axis:     #383835;
+      --hairline: rgba(255, 255, 255, 0.10);
+      --s1:       #3987e5;
+      --s2:       #d95926;
+      --good:     #0ca30c;
+    --bad:      #d03b3b;
+      --bad:      #d03b3b;
+      --tip-bg:   rgba(26, 26, 25, 0.97);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:    #0d0d0d;
+    --surface:  #1a1a19;
+    --ink:      #ffffff;
+    --ink-2:    #c3c2b7;
+    --muted:    #898781;
+    --grid:     #2c2c2a;
+    --axis:     #383835;
+    --hairline: rgba(255, 255, 255, 0.10);
+    --s1:       #3987e5;
+    --s2:       #d95926;
+    --good:     #0ca30c;
+    --tip-bg:   rgba(26, 26, 25, 0.97);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans TC",
+                 "Microsoft JhengHei", sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: clamp(32px, 6vw, 72px) clamp(18px, 4vw, 32px) 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  /* ── masthead ── */
+  .eyebrow {
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(30px, 5.2vw, 46px);
+    line-height: 1.14;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+  .thesis {
+    font-size: clamp(16px, 2.1vw, 18.5px);
+    color: var(--ink-2);
+    margin: 0;
+    max-width: 60ch;
+    text-wrap: pretty;
+  }
+  .thesis strong { color: var(--ink); font-weight: 650; }
+  /* keep short emphasised terms from splitting across a CJK line break */
+  .nb { white-space: nowrap; }
+
+  /* ── figure ── */
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 22px clamp(14px, 2.5vw, 24px) 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .fig-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 20px;
+    margin-bottom: 6px;
+  }
+  .fig-title { font-size: 15.5px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  .fig-sub { font-size: 13px; color: var(--muted); margin: 2px 0 0; }
+
+  .legend { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  .legend-item {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--ink-2);
+  }
+  .key { width: 18px; height: 2px; border-radius: 1px; flex: none; }
+
+  /* Below ~500px the plot stops being readable, so it scrolls inside its own
+     container rather than squashing. The page body itself never scrolls. */
+  .chart-scroll { overflow-x: auto; overflow-y: hidden; }
+  .chart-host { position: relative; min-width: 460px; }
+  svg { display: block; width: 100%; }
+  svg:focus-visible { outline: 2px solid var(--s1); outline-offset: 3px; border-radius: 4px; }
+  .axis-label {
+    font-size: 11px;
+    fill: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .end-label { font-size: 12px; font-weight: 650; fill: var(--ink); }
+
+  /* ── tooltip ── */
+  .tip {
+    position: absolute; top: 0; left: 0;
+    pointer-events: none;
+    background: var(--tip-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 12.5px;
+    min-width: 176px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.13);
+    opacity: 0;
+    transition: opacity 120ms ease;
+    backdrop-filter: blur(3px);
+  }
+  .tip[data-on="1"] { opacity: 1; }
+  .tip-date {
+    font-size: 11px; color: var(--muted); margin-bottom: 6px;
+    font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  }
+  .tip-row {
+    display: grid; grid-template-columns: 16px 1fr auto auto;
+    align-items: baseline; gap: 4px 9px; margin-top: 4px;
+  }
+  .tip-row .key { align-self: center; }
+  .tip-val {
+    font-weight: 680; color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .tip-dd {
+    color: var(--ink-2); font-size: 11.5px;
+    font-variant-numeric: tabular-nums; min-width: 44px; text-align: right;
+  }
+  .tip-name { color: var(--ink-2); font-size: 12px; }
+  .tip-foot {
+    margin-top: 7px; padding-top: 6px;
+    border-top: 1px solid var(--hairline);
+    font-size: 10.5px; color: var(--muted);
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+
+  /* ── comparison table ── */
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 420px; }
+  caption {
+    text-align: left; font-size: 15.5px; font-weight: 650;
+    margin-bottom: 4px; letter-spacing: -0.01em;
+  }
+  .cap-sub { font-size: 13px; color: var(--muted); font-weight: 400; margin-bottom: 12px; }
+  th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--hairline); }
+  th:first-child, td:first-child { text-align: left; padding-left: 0; }
+  td:last-child, th:last-child { padding-right: 0; }
+  thead th {
+    font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--axis);
+  }
+  tbody td { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  tbody th { font-weight: 500; color: var(--ink-2); font-size: 14px; }
+  .win { color: var(--ink); font-weight: 650; }
+  .th-key { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+
+  /* ── folds ── */
+  .folds { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; }
+  .fold {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 8px; padding: 12px 13px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .fold-when {
+    font-size: 11px; color: var(--muted);
+    font-variant-numeric: tabular-nums; letter-spacing: 0.01em;
+  }
+  .fold-cagr {
+    font-size: 21px; font-weight: 680; letter-spacing: -0.02em;
+    color: var(--good); line-height: 1.25;
+  }
+  .fold-meta {
+    font-size: 11.5px; color: var(--ink-2);
+    font-variant-numeric: tabular-nums; line-height: 1.5;
+  }
+  .fold.partial { border-style: dashed; }
+  /* the sign is in the text too, so colour never carries this alone */
+  .fold-cagr.neg { color: var(--bad); }
+  .fold.partial .fold-cagr, .fold.partial .fold-cagr.neg { color: var(--ink-2); }
+
+  /* ── prose ── */
+  /* CJK does not take Latin-scale tracking gracefully — keep it slight */
+  h2 {
+    font-size: 14px; letter-spacing: 0.05em;
+    color: var(--ink-2); font-weight: 650; margin: 0 0 16px;
+  }
+  section { display: flex; flex-direction: column; }
+  .notes { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+  .notes li {
+    font-size: 14.5px; color: var(--ink-2);
+    padding-left: 17px; position: relative; max-width: 68ch;
+  }
+  .notes li::before {
+    content: ""; position: absolute; left: 0; top: 10px;
+    width: 6px; height: 1.5px; background: var(--axis);
+  }
+  .notes strong { color: var(--ink); font-weight: 650; }
+
+  footer {
+    border-top: 1px solid var(--hairline);
+    padding-top: 20px;
+    font-size: 12.5px;
+    color: var(--muted);
+    max-width: 68ch;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tip { transition: none; }
+  }
+</style>
+<!--/HEAD-->
+
+<!--BODY-->
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">台股 · 2006–2026 · Walk-Forward 樣本外</p>
+    <h1>二十年跑贏大盤，但沒有躲過 2008</h1>
+    <p class="thesis">
+      一套只買「長期穩定上漲」股票的策略，經過 11 折 walk-forward 驗證後的
+      <strong class="nb">樣本外</strong>成績：20.6 年年化 15.6%，比大盤多 5.8 個百分點，
+      而且只用 0.61 的 beta。<strong>但它在 2008 一樣跌了 46%。</strong>
+      這頁把兩件事一起放，因為只講前面那句話是不誠實的。
+    </p>
+  </header>
+
+  <figure>
+    <div class="fig-head">
+      <div>
+        <p class="fig-title">資產成長倍數（對數刻度）</p>
+        <p class="fig-sub">起始資金 = 1×，已扣手續費 0.1425% 與證交稅 0.3%</p>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><span class="key" style="background:var(--s1)"></span>穩定上漲策略</span>
+        <span class="legend-item"><span class="key" style="background:var(--s2)"></span>台股大盤 TAIEX</span>
+      </div>
+    </div>
+
+    <div class="chart-scroll">
+      <div class="chart-host" id="host">
+        <!-- aria-label is written from the data at render time; hard-coding it
+             would leave screen readers with last build's numbers -->
+        <svg id="chart" role="img" tabindex="0"></svg>
+        <div class="tip" id="tip" aria-hidden="true"></div>
+      </div>
+    </div>
+    <p class="fig-sub" style="margin-top:2px">
+      下半部為回檔（drawdown）：距離歷史高點的跌幅。滑鼠移過任一點可同時讀到兩條線的數字。
+    </p>
+  </figure>
+
+  <section>
+    <div class="table-scroll">
+      <table>
+        <caption>
+          二十年總指標
+          <div class="cap-sub">2006-01-02 至 2026-08-05，共 20.6 年，全部為樣本外</div>
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">指標</th>
+            <th scope="col"><span class="th-key"><span class="key" style="background:var(--s1)"></span>策略</span></th>
+            <th scope="col"><span class="th-key"><span class="key" style="background:var(--s2)"></span>大盤</span></th>
+          </tr>
+        </thead>
+        <tbody id="metrics-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>分段檢驗：每一折都是樣本外</h2>
+    <div class="folds" id="folds"></div>
+  </section>
+
+  <section>
+    <h2>2008 發生了什麼</h2>
+    <ul class="notes">
+      <li>
+        這一折的超參數是用 <strong>2002-01 到 2008-01</strong> 的資料挑的，訓練截止時
+        台股才從高點跌約 13%，主跌段完全在樣本外。所以底下的結果沒有被後見之明汙染。
+      </li>
+      <li>
+        <strong>策略沒有逃掉。</strong>樣本外最大回檔 <strong>-46.5%</strong>（同期大盤 -58.3%）。
+        它比大盤少跌，但那是選股的效果，不是避險的效果。
+      </li>
+      <li>
+        減碼來得太晚。持股從 10 檔降到 6 檔發生在 2008-12 到 2009-03——
+        <strong>台股 2008-11 就見底了</strong>。等於賣在最低點，隔月又買回去。
+      </li>
+      <li>
+        原因是結構性的：分數建立在 250–500 天的對數回歸上，崩盤初期它看到的是
+        「好股票變便宜」，防追高的 <code>restraint</code> 項甚至因為股價低於趨勢線而給滿分。
+        <strong>它是設計來抱住長趨勢的，不是設計來逃命的。</strong>
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>怎麼做到的</h2>
+    <ul class="notes">
+      <li>
+        對每檔股票的<strong>對數股價</strong>做線性回歸，得到「年化斜率」與「殘差離散度」。
+        穩定上漲 = 斜率為正，而且股價緊貼著回歸線走。
+      </li>
+      <li>
+        分數對斜率<strong>不是愈大愈好</strong>：它是一條倒 U 型曲線。漲太兇的（年化 +400%）
+        和幾乎不動的，分數都趨近於零——前者不可能持久，後者是死錢。
+      </li>
+      <li>
+        兩道防線擋掉<strong>追高</strong>：回顧期切成數段、每段都必須各自上漲（一次暴衝其餘躺平的會被刷掉）；
+        另外，現價若已高出自己的趨勢線太多，分數也會被打折。
+      </li>
+      <li>
+        超參數由 <strong>walk-forward 交叉驗證</strong>決定：每折只看訓練區間挑參數，
+        原封不動套用到後面沒看過的測試區間，再把 6 段樣本外曲線串起來。
+        訓練→測試的 Sharpe 只衰退 0.12，代表沒有嚴重過度配適。
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>必須說清楚的事</h2>
+    <ul class="notes">
+      <li>
+        <strong>倖存者偏誤</strong>：股票清單來自證交所目前<em>仍在上市櫃</em>的公司，
+        已下市的不在其中。這會讓所有回測績效偏樂觀，是本測試最主要的偏誤來源。
+      </li>
+      <li>
+        <strong>2008 年以前只有上市股票</strong>：Yahoo 沒有上櫃（.TWO）2008 年以前的日線，
+        所以早期的選股池約 600 檔而非 1,969 檔。台股日線本身也只回溯到 2000-01-04，
+        再往前拉不動了。
+      </li>
+      <li>
+        <strong>基準沒有含息，超額報酬被高估了</strong>：個股用的是還原股價（股利已再投入），
+        但大盤 <code>^TWII</code> 是價格指數、本身不含息。兩邊定義不一致，
+        圖上那 +5.8 個百分點的差距應該扣掉約當市場股利率才公道。
+        要修得換成證交所的「發行量加權股價報酬指數」。
+      </li>
+      <li>
+        <strong>這不是一套避險策略</strong>。它的 beta 是 0.61 而不是 0，最大回檔 -46.5%。
+        如果你需要的是崩盤時能保住本金的東西，這頁的結果說「它做不到」。
+      </li>
+      <li>
+        以收盤價成交，未模擬漲跌停鎖死與滑價；停牌最多向前填補 10 個交易日。
+      </li>
+    </ul>
+  </section>
+
+  <footer>
+    研究與學習用途，<strong>不構成投資建議</strong>。過去績效不代表未來表現。
+    資料來源 yfinance（還原股價），基準為台灣加權股價指數 ^TWII。
+  </footer>
+
+</div>
+<!--/BODY-->
+
+<!--SCRIPT-->
+<script id="chart-data" type="application/json">__DATA__</script>
+
+<script>
+(() => {
+  "use strict";
+  const D = JSON.parse(document.getElementById("chart-data").textContent);
+  const N = D.dates.length;
+
+  const svg  = document.getElementById("chart");
+  const host = document.getElementById("host");
+  const tip  = document.getElementById("tip");
+  const NS   = "http://www.w3.org/2000/svg";
+
+  // ── geometry ────────────────────────────────────────────────────────
+  const PAD = { l: 44, r: 60, t: 12, b: 24 };
+  const H_EQ = 300, H_GAP = 26, H_DD = 128;
+  const H = PAD.t + H_EQ + H_GAP + H_DD + PAD.b;
+
+  // Axis domains are derived, never hard-coded: extending the backtest changed
+  // the equity range from 7x to 20x and drawdowns from -30% to -58%, and fixed
+  // bounds silently clipped both.
+  const allEq = D.strategy.concat(D.taiex);
+  const allDd = D.dd_strategy.concat(D.dd_taiex);
+  const Y_LO = Math.min(...allEq) * 0.92;
+  const Y_HI = Math.max(...allEq) * 1.16;
+  const DD_LO = Math.min(...allDd) * 1.06;
+  const DD_HI = 2;
+
+  // 1-2-3-5-7 per decade, keeping only what the domain actually spans
+  const EQ_TICKS = (() => {
+    const out = [];
+    for (let d = -2; d <= 4; d++) {
+      for (const m of [1, 2, 3, 5, 7]) {
+        // round away binary noise: 7 * 10^-1 is 0.7000000000000001, and the
+        // tick label is rendered straight from this number
+        const v = Math.round(m * Math.pow(10, d) * 1e6) / 1e6;
+        if (v >= Y_LO && v <= Y_HI) out.push(v);
+      }
+    }
+    return out.length > 8 ? out.filter((_, i) => i % 2 === 0) : out;
+  })();
+
+  const DD_TICKS = (() => {
+    const step = DD_LO < -45 ? 20 : DD_LO < -25 ? 10 : 5;
+    const out = [];
+    for (let v = 0; v >= DD_LO; v -= step) out.push(v);
+    return out;
+  })();
+
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const fmtX = (v) => v.toFixed(2) + "×";
+  const fmtP = (v) => v.toFixed(1) + "%";
+
+  let W = 900, plotW = 800;
+  const xAt  = (i) => PAD.l + (plotW * i) / (N - 1);
+  const yEq  = (v) => PAD.t + H_EQ * (1 - (Math.log(v) - Math.log(Y_LO)) / (Math.log(Y_HI) - Math.log(Y_LO)));
+  const ddTop = PAD.t + H_EQ + H_GAP;
+  const yDd  = (v) => ddTop + H_DD * (1 - (v - DD_LO) / (DD_HI - DD_LO));
+
+  const el = (tag, attrs) => {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  };
+  const path = (vals, yFn) => {
+    let d = "";
+    for (let i = 0; i < N; i++) d += (i ? "L" : "M") + xAt(i).toFixed(2) + " " + yFn(vals[i]).toFixed(2);
+    return d;
+  };
+
+  // year boundaries for x ticks
+  const yearFirst = [];
+  let seen = "";
+  D.dates.forEach((s, i) => {
+    const y = s.slice(0, 4);
+    if (y !== seen) { seen = y; yearFirst.push([i, y]); }
+  });
+
+  function render() {
+    W = Math.max(host.clientWidth || 900, 460);
+    plotW = W - PAD.l - PAD.r;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("height", H);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    const C = {
+      grid: css("--grid"), axis: css("--axis"), muted: css("--muted"),
+      s1: css("--s1"), s2: css("--s2"), surface: css("--surface"),
+    };
+
+    const g = el("g", {});
+    svg.appendChild(g);
+
+    // gridlines — solid hairlines, one step off surface
+    EQ_TICKS.forEach((t) => {
+      g.appendChild(el("line", {
+        x1: PAD.l, x2: PAD.l + plotW, y1: yEq(t), y2: yEq(t),
+        stroke: C.grid, "stroke-width": 1,
+      }));
+      const lb = el("text", { x: PAD.l - 9, y: yEq(t) + 4, "text-anchor": "end", class: "axis-label" });
+      lb.textContent = t + "×";
+      g.appendChild(lb);
+    });
+    DD_TICKS.forEach((t) => {
+      g.appendChild(el("line", {
+        x1: PAD.l, x2: PAD.l + plotW, y1: yDd(t), y2: yDd(t),
+        stroke: t === 0 ? C.axis : C.grid, "stroke-width": 1,
+      }));
+      const lb = el("text", { x: PAD.l - 9, y: yDd(t) + 4, "text-anchor": "end", class: "axis-label" });
+      lb.textContent = t + "%";
+      g.appendChild(lb);
+    });
+
+    // x ticks under the drawdown panel (shared domain, labelled once)
+    const step = plotW < 560 ? 2 : 1;
+    yearFirst.forEach(([i, y], k) => {
+      if (k % step) return;
+      const x = xAt(i);
+      g.appendChild(el("line", { x1: x, x2: x, y1: ddTop + H_DD, y2: ddTop + H_DD + 4, stroke: C.axis, "stroke-width": 1 }));
+      const lb = el("text", { x, y: ddTop + H_DD + 17, "text-anchor": "middle", class: "axis-label" });
+      lb.textContent = y;
+      g.appendChild(lb);
+    });
+
+    // drawdown: strategy gets a 10% wash + line, benchmark a line only
+    const ddArea = path(D.dd_strategy, yDd) +
+      `L${xAt(N - 1).toFixed(2)} ${yDd(0).toFixed(2)}L${xAt(0).toFixed(2)} ${yDd(0).toFixed(2)}Z`;
+    g.appendChild(el("path", { d: ddArea, fill: C.s1, "fill-opacity": 0.10, stroke: "none" }));
+    g.appendChild(el("path", {
+      d: path(D.dd_taiex, yDd), fill: "none", stroke: C.s2,
+      "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+    g.appendChild(el("path", {
+      d: path(D.dd_strategy, yDd), fill: "none", stroke: C.s1,
+      "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+
+    // equity: 2px lines, round caps
+    g.appendChild(el("path", {
+      d: path(D.taiex, yEq), fill: "none", stroke: C.s2,
+      "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+    g.appendChild(el("path", {
+      d: path(D.strategy, yEq), fill: "none", stroke: C.s1,
+      "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+
+    // endpoint dots with a 2px surface ring
+    const last = N - 1;
+    [[D.strategy[last], C.s1], [D.taiex[last], C.s2]].forEach(([v, col]) => {
+      g.appendChild(el("circle", {
+        cx: xAt(last), cy: yEq(v), r: 4.5, fill: col,
+        stroke: C.surface, "stroke-width": 2,
+      }));
+    });
+
+    // direct end labels; nudge apart + leader line only if they would collide
+    let ys = yEq(D.strategy[last]), yt = yEq(D.taiex[last]);
+    const MIN = 15;
+    if (Math.abs(ys - yt) < MIN) {
+      const mid = (ys + yt) / 2;
+      if (ys <= yt) { ys = mid - MIN / 2; yt = mid + MIN / 2; }
+      else { ys = mid + MIN / 2; yt = mid - MIN / 2; }
+      [[yEq(D.strategy[last]), ys], [yEq(D.taiex[last]), yt]].forEach(([from, to]) => {
+        g.appendChild(el("line", {
+          x1: xAt(last) + 6, x2: xAt(last) + 11, y1: from, y2: to,
+          stroke: C.axis, "stroke-width": 1,
+        }));
+      });
+    }
+    [[fmtX(D.strategy[last]), ys], [fmtX(D.taiex[last]), yt]].forEach(([txt, y]) => {
+      const t = el("text", { x: xAt(last) + 13, y: y + 4, class: "end-label" });
+      t.textContent = txt;
+      g.appendChild(t);
+    });
+
+    // crosshair + hover dots, hidden until pointed at
+    const hair = el("g", { opacity: 0 });
+    hair.appendChild(el("line", {
+      id: "hair-line", x1: 0, x2: 0, y1: PAD.t, y2: ddTop + H_DD,
+      stroke: C.axis, "stroke-width": 1,
+    }));
+    [["hd-1", C.s1], ["hd-2", C.s2], ["hd-3", C.s1], ["hd-4", C.s2]].forEach(([id, col]) => {
+      hair.appendChild(el("circle", { id, r: 4.5, fill: col, stroke: C.surface, "stroke-width": 2 }));
+    });
+    svg.appendChild(hair);
+    svg.__hair = hair;
+  }
+
+  // ── hover / focus readout ───────────────────────────────────────────
+  let idx = -1;
+
+  function show(i) {
+    if (i < 0 || i >= N) return;
+    idx = i;
+    const hair = svg.__hair;
+    if (!hair) return;
+    hair.setAttribute("opacity", 1);
+    const x = xAt(i);
+    hair.querySelector("#hair-line").setAttribute("x1", x);
+    hair.querySelector("#hair-line").setAttribute("x2", x);
+    const pts = [
+      ["#hd-1", yEq(D.strategy[i])], ["#hd-2", yEq(D.taiex[i])],
+      ["#hd-3", yDd(D.dd_strategy[i])], ["#hd-4", yDd(D.dd_taiex[i])],
+    ];
+    pts.forEach(([sel, y]) => {
+      const c = hair.querySelector(sel);
+      c.setAttribute("cx", x); c.setAttribute("cy", y);
+    });
+
+    tip.replaceChildren();
+    const dt = document.createElement("div");
+    dt.className = "tip-date";
+    dt.textContent = D.dates[i];
+    tip.appendChild(dt);
+
+    const rows = [
+      [css("--s1"), "穩定上漲策略", fmtX(D.strategy[i]), fmtP(D.dd_strategy[i])],
+      [css("--s2"), "台股大盤", fmtX(D.taiex[i]), fmtP(D.dd_taiex[i])],
+    ];
+    rows.forEach(([col, name, val, dd]) => {
+      const r = document.createElement("div");
+      r.className = "tip-row";
+      const k = document.createElement("span");
+      k.className = "key";
+      k.style.background = col;
+      const n = document.createElement("span");
+      n.className = "tip-name";
+      n.textContent = name;
+      const v = document.createElement("span");
+      v.className = "tip-val";
+      v.textContent = val;
+      const d = document.createElement("span");
+      d.className = "tip-dd";
+      d.textContent = dd;
+      r.append(k, n, v, d);
+      tip.appendChild(r);
+    });
+
+    const foot = document.createElement("div");
+    foot.className = "tip-foot";
+    const f1 = document.createElement("span");
+    f1.textContent = "成長倍數";
+    const f2 = document.createElement("span");
+    f2.textContent = "當時回檔";
+    foot.append(f1, f2);
+    tip.appendChild(foot);
+
+    tip.dataset.on = "1";
+    tip.setAttribute("aria-hidden", "false");
+
+    const hostW = host.clientWidth || W;
+    const scale = hostW / W;
+    const px = x * scale;
+    const tw = tip.offsetWidth;
+    // flip to the left of the crosshair rather than run over the end labels
+    let left = px + 16;
+    if (left + tw > hostW - 4) left = px - 16 - tw;
+    tip.style.left = Math.max(4, Math.min(left, hostW - tw - 4)) + "px";
+    tip.style.top = Math.max(4, PAD.t * scale + 8) + "px";
+  }
+
+  function hide() {
+    if (svg.__hair) svg.__hair.setAttribute("opacity", 0);
+    tip.dataset.on = "0";
+    tip.setAttribute("aria-hidden", "true");
+  }
+
+  function nearest(clientX) {
+    const r = svg.getBoundingClientRect();
+    const rel = ((clientX - r.left) / r.width) * W;
+    const i = Math.round(((rel - PAD.l) / plotW) * (N - 1));
+    return Math.max(0, Math.min(N - 1, i));
+  }
+
+  svg.addEventListener("pointermove", (e) => show(nearest(e.clientX)));
+  svg.addEventListener("pointerleave", hide);
+  svg.addEventListener("blur", hide);
+  svg.addEventListener("focus", () => show(idx < 0 ? N - 1 : idx));
+  svg.addEventListener("keydown", (e) => {
+    const jump = e.shiftKey ? 13 : 1;
+    if (e.key === "ArrowRight") { show(Math.min(N - 1, (idx < 0 ? 0 : idx) + jump)); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { show(Math.max(0, (idx < 0 ? N - 1 : idx) - jump)); e.preventDefault(); }
+    else if (e.key === "Home") { show(0); e.preventDefault(); }
+    else if (e.key === "End") { show(N - 1); e.preventDefault(); }
+    else if (e.key === "Escape") { hide(); }
+  });
+
+  // ── tables & fold cards ─────────────────────────────────────────────
+  const M = D.metrics.strategy, B = D.metrics.taiex, R = D.metrics.relative;
+  const pct = (v, sign) => (sign && v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+  const num = (v) => v.toFixed(2);
+
+  // `better` marks which column wins, so the comparison is not colour-only
+  const ROWS = [
+    ["總報酬", pct(M.total_return, true), pct(B.total_return, true), M.total_return > B.total_return],
+    ["年化報酬 CAGR", pct(M.cagr, true), pct(B.cagr, true), M.cagr > B.cagr],
+    ["年化波動度", pct(M.volatility), pct(B.volatility), M.volatility < B.volatility],
+    ["Sharpe", num(M.sharpe), num(B.sharpe), M.sharpe > B.sharpe],
+    ["Sortino", num(M.sortino), num(B.sortino), M.sortino > B.sortino],
+    ["最大回檔 MDD", pct(M.max_drawdown), pct(B.max_drawdown), M.max_drawdown > B.max_drawdown],
+    ["Calmar", num(M.calmar), num(B.calmar), M.calmar > B.calmar],
+    ["最長水下期間", M.longest_drawdown_days + " 天", B.longest_drawdown_days + " 天",
+      M.longest_drawdown_days < B.longest_drawdown_days],
+    ["最好的一年", pct(M.best_year, true), pct(B.best_year, true), M.best_year > B.best_year],
+    ["最差的一年", pct(M.worst_year, true), pct(B.worst_year, true), M.worst_year > B.worst_year],
+    ["上漲月份比例", pct(M.positive_months), pct(B.positive_months), M.positive_months > B.positive_months],
+    ["Beta（對大盤）", num(R.beta), "1.00", false],
+  ];
+
+  const tb = document.getElementById("metrics-body");
+  ROWS.forEach(([label, a, b, aWins]) => {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.scope = "row";
+    th.textContent = label;
+    const td1 = document.createElement("td");
+    td1.textContent = a;
+    if (aWins) td1.className = "win";
+    const td2 = document.createElement("td");
+    td2.textContent = b;
+    tr.append(th, td1, td2);
+    tb.appendChild(tr);
+  });
+
+  const foldWrap = document.getElementById("folds");
+  D.folds.forEach((f) => {
+    const d = document.createElement("div");
+    d.className = "fold" + (f.partial ? " partial" : "");
+    const when = document.createElement("div");
+    when.className = "fold-when";
+    when.textContent = f.test_start.slice(0, 7) + " → " + f.test_end.slice(0, 7);
+    const c = document.createElement("div");
+    c.className = "fold-cagr" + (f.cagr > 0 ? "" : " neg");
+    c.textContent = pct(f.cagr, true);
+    const meta = document.createElement("div");
+    meta.className = "fold-meta";
+    meta.textContent = "Sharpe " + f.sharpe.toFixed(2) + " · 回檔 " + pct(f.mdd) +
+      (f.partial ? " · 未滿期" : "");
+    d.append(when, c, meta);
+    foldWrap.appendChild(d);
+  });
+
+  // ── accessible summary, derived so it cannot go stale ───────────────
+  {
+    const last = N - 1;
+    svg.setAttribute(
+      "aria-label",
+      `${D.dates[0].slice(0, 4)} 至 ${D.dates[last].slice(0, 4)} 年，` +
+        `穩定上漲策略與台股大盤的資產成長倍數與回檔比較圖。` +
+        `策略成長 ${fmtX(D.strategy[last])}、最大回檔 ${fmtP(Math.min(...D.dd_strategy))}；` +
+        `大盤成長 ${fmtX(D.taiex[last])}、最大回檔 ${fmtP(Math.min(...D.dd_taiex))}。` +
+        `詳細數字見下方表格。`
+    );
+  }
+
+  // ── lifecycle ───────────────────────────────────────────────────────
+  render();
+  const ro = new ResizeObserver(() => { render(); if (idx >= 0) show(idx); });
+  ro.observe(host);
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  mq.addEventListener("change", () => { render(); if (idx >= 0) show(idx); });
+  new MutationObserver(() => { render(); if (idx >= 0) show(idx); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
+<!--/SCRIPT-->

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+
+# Cached market data (re-downloadable via `twstable fetch`)
+data/
+
+# Generated artefacts; the mined candidate pool is large and reproducible
+results/*.npz

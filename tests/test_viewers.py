@@ -6,12 +6,16 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import gc  # noqa: E402
+import weakref  # noqa: E402
+
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+from matplotlib.backend_bases import KeyEvent  # noqa: E402
 
 from twstable.viewers import backtest_viewer as bv  # noqa: E402
 from twstable.viewers import segment_viewer as sv  # noqa: E402
-from twstable.viewers._mplsetup import use_cjk_font  # noqa: E402
+from twstable.viewers._mplsetup import VIEWER_KEYS, claim_keys, use_cjk_font  # noqa: E402
 
 # the real entry points do this too; without it every Chinese stock name in a
 # title emits a "glyph missing from font" warning
@@ -21,6 +25,15 @@ use_cjk_font()
 class FakeEvent:
     def __init__(self, key: str) -> None:
         self.key = key
+
+
+def press(fig, key: str) -> None:
+    """Send a key through the real canvas callback path, as a GUI would.
+
+    Calling ``viewer.on_key`` directly cannot catch a handler that matplotlib
+    has dropped, which is exactly how the viewers once shipped deaf.
+    """
+    KeyEvent("key_press_event", fig.canvas, key)._process()
 
 
 # --- segment viewer --------------------------------------------------------
@@ -38,7 +51,8 @@ def _ohlc(n: int, seed: int = 0) -> pd.DataFrame:
     )
 
 
-def test_segment_viewer_navigates_and_toggles(monkeypatch) -> None:
+def _patch_segment_sources(monkeypatch) -> pd.DataFrame:
+    """Point the segment viewer at synthetic bars and return a 2-row segment set."""
     bars = _ohlc(400)
     monkeypatch.setattr(sv, "load_prices", lambda ticker: bars)
     monkeypatch.setattr(
@@ -46,8 +60,7 @@ def test_segment_viewer_navigates_and_toggles(monkeypatch) -> None:
         "load_universe",
         lambda: pd.DataFrame({"stock_id": ["1101", "2330"], "ticker": ["1101.TW", "2330.TW"]}),
     )
-
-    seg = pd.DataFrame(
+    return pd.DataFrame(
         {
             "ID": ["1101", "2330"],
             "name": ["台泥", "台積電"],
@@ -58,6 +71,10 @@ def test_segment_viewer_navigates_and_toggles(monkeypatch) -> None:
             "stdev": [1.05, 1.04],
         }
     )
+
+
+def test_segment_viewer_navigates_and_toggles(monkeypatch) -> None:
+    seg = _patch_segment_sources(monkeypatch)
     viewer = sv.SegmentViewer(seg)
     assert viewer.idx == 0
 
@@ -83,6 +100,51 @@ def test_segment_viewer_navigates_and_toggles(monkeypatch) -> None:
     assert viewer.idx == 1
     viewer.on_key(FakeEvent("home"))
     assert viewer.idx == 0
+
+
+def test_segment_viewer_keeps_listening_after_caller_drops_it(monkeypatch) -> None:
+    """Regression: run() discards the viewer, and mpl_connect holds it weakly.
+
+    Without a strong reference the handler is collected the moment run()
+    returns, so the window answers only matplotlib's own shortcuts.
+    """
+    seg = _patch_segment_sources(monkeypatch)
+
+    def build():
+        viewer = sv.SegmentViewer(seg)  # exactly what run() does: value dropped
+        return weakref.ref(viewer), viewer.fig
+
+    ref, fig = build()
+    gc.collect()
+    assert ref() is not None, "viewer was garbage collected; its key handler is dead"
+
+    press(fig, "down")
+    assert ref().idx == 1, "key press did not reach the viewer"
+    press(fig, "home")
+    assert ref().idx == 0
+
+
+def test_segment_viewer_hint_is_not_restamped_per_redraw(monkeypatch) -> None:
+    seg = _patch_segment_sources(monkeypatch)
+    viewer = sv.SegmentViewer(seg)
+    before = len(viewer.fig.texts)
+    for _ in range(5):
+        viewer.on_key(FakeEvent("down"))
+        viewer.on_key(FakeEvent("up"))
+    assert len(viewer.fig.texts) == before
+
+
+def test_claim_keys_releases_viewer_shortcuts_only() -> None:
+    from matplotlib import rcParams
+
+    with matplotlib.rc_context():
+        claim_keys()
+        for param, keys in rcParams.items():
+            if param.startswith("keymap."):
+                assert not (set(keys) & VIEWER_KEYS), f"{param} still steals {keys}"
+        # untouched shortcuts must survive
+        assert "s" in rcParams["keymap.save"]
+        assert "g" in rcParams["keymap.grid"]
 
 
 def test_segment_viewer_survives_missing_prices(monkeypatch) -> None:
@@ -169,6 +231,19 @@ def test_backtest_viewer_navigates_and_toggles() -> None:
     assert viewer.log_scale
     viewer.on_key(FakeEvent("l"))
     assert viewer.ax_eq.get_yscale() == "linear"
+
+
+def test_backtest_viewer_keeps_listening_after_caller_drops_it() -> None:
+    def build():
+        viewer = bv.BacktestViewer(_result())
+        return weakref.ref(viewer), viewer.fig
+
+    ref, fig = build()
+    gc.collect()
+    assert ref() is not None, "viewer was garbage collected; its key handler is dead"
+
+    press(fig, "pagedown")
+    assert ref().idx == 10
 
 
 def test_backtest_viewer_without_benchmark() -> None:

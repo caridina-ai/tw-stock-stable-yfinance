@@ -70,6 +70,10 @@ class BacktestViewer:
         self.ax_txt = self.fig.add_subplot(gs[2, 1])
 
         self.fig.canvas.mpl_connect("key_press_event", self.on_key)
+        # mpl_connect holds bound methods weakly: without a strong reference the
+        # viewer is collected as soon as the caller drops it and the keyboard
+        # stops working.  The figure outlives us, so ride along on it.
+        self.fig.twstable_viewer = self
         self.draw_static()
         self.draw_dynamic()
 

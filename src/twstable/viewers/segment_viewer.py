@@ -11,8 +11,11 @@ B               toggle the +-1 sigma dispersion band
 Q / Esc         quit
 
 On a log price axis the fitted trend is a straight line; on a linear axis the
-same fit shows up as an exponential curve.  That is the whole point of fitting
-in log space, so the toggle is the quickest way to sanity-check a segment.
+same fit shows up as an exponential curve.  Do not expect a dramatic bend: the
+curvature scales with the segment's *total* move, and a mined segment typically
+gains well under 20% end to end, which puts the widest gap between the curve and
+its chord at under 1% of the plot height.  The toggle is a sanity check on the
+axis, not a way to eyeball the growth rate -- read that off ``slope`` instead.
 """
 
 from __future__ import annotations
@@ -46,6 +49,19 @@ class SegmentViewer:
 
         self.fig, self.ax = plt.subplots(figsize=(13, 7.5))
         self.fig.canvas.mpl_connect("key_press_event", self.on_key)
+        # mpl_connect keeps a *weak* reference to a bound method, so once the
+        # caller drops the viewer it is collected and the window goes deaf --
+        # leaving only matplotlib's own shortcuts alive.  pyplot keeps the
+        # figure alive for as long as the window is open, so tie the viewer's
+        # lifetime to the figure's.
+        self.fig.twstable_viewer = self
+        # Figure-level text is not cleared by ax.clear(), so stamp the key hint
+        # once here; doing it in draw() would stack a copy per redraw.
+        self.fig.text(
+            0.995, 0.01,
+            "↑/↓ segment   PgUp/PgDn ±10   Home/End   L log/linear   B band   Q quit",
+            ha="right", va="bottom", fontsize=8, color="#555555",
+        )
         self.draw()
 
     # -- data ---------------------------------------------------------------
@@ -142,11 +158,6 @@ class SegmentViewer:
             fontsize=12,
         )
         self.ax.legend(loc="upper left", fontsize=9, framealpha=0.9)
-        self.fig.text(
-            0.995, 0.01,
-            "↑/↓ segment   PgUp/PgDn ±10   Home/End   L log/linear   B band   Q quit",
-            ha="right", va="bottom", fontsize=8, color="#555555",
-        )
         self.fig.tight_layout()
         self.fig.canvas.draw_idle()
 

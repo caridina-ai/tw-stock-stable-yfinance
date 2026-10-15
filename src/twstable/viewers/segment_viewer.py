@@ -12,9 +12,9 @@ Q / Esc         quit
 
 On a log price axis the fitted trend is a straight line; on a linear axis the
 same fit shows up as an exponential curve.  Do not expect a dramatic bend: the
-curvature scales with the segment's *total* move, and a mined segment typically
-gains well under 20% end to end, which puts the widest gap between the curve and
-its chord at under 1% of the plot height.  The toggle is a sanity check on the
+curvature scales with the segment's *total* move, and the median mined segment
+gains about 25% end to end, which puts the widest gap between the curve and its
+chord at roughly 3% of the plot height.  The toggle is a sanity check on the
 axis, not a way to eyeball the growth rate -- read that off ``slope`` instead.
 """
 

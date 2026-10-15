@@ -1,0 +1,6 @@
+# Data snapshot this version of the code was run on.
+# data/ is a clone of the repo below (private), checked out at `commit`.
+repo=caridina-ai/tw-stock-stable-yfinance-data
+commit=a448e374fb9dc164b9e1de57ccb6443ede7b1dfb
+dates=2000-01-03..2026-10-15
+symbols=1973

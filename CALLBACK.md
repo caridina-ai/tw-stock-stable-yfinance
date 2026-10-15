@@ -31,9 +31,13 @@ MD
       介意的話把 repo 改 private（`setup.py` 走 git，改 private 後照樣能用）。
       另外，完整 `git clone`（不加 `--single-branch`）會連 `data` 一起抓下來。
 
-## 進行中（若這段還在，代表上一個 session 沒跑完，下個 session 請接手）
+## 要本尊知道的事
 
-2026-10-15 的 session 正在重跑完整流程以更新 `results/` 與 `docs/`：
-`fetch` → `mine -n 1000 -m 150` → `backtest` → `wfcv --train-years 6 --test-years 2 --trials 400`
-→ `report` → 更新 README 的數字 → push `main` → `setup.py publish`。
-`main` 上的程式碼是完整的；只有 `results/`、`docs/index.html` 與 README 裡的數字還是舊資料（截至 2026-08-05）。
+- [ ] **重跑後 2008 的結論變了，請看一下 README「2008」那節**（`main` 的 `ec973bc`）。
+      fold 2 這次挑到較嚴的 `min_score`（0.27，舊版是 0.05），策略在 2008-10 到 2009-06 空手，
+      樣本外回檔從 -46.5% 變成 -25.9%，整體最大回檔從 -46.5% 變成 -28.2%。
+      最可能的原因是我把成交金額改用原始價計算（`6600766`），改變了流動性篩選與 In-Sample 排名。
+      我把 README 和報告改成「這次躲過了，但靠的是不穩的門檻」，兩個結果並列，
+      沒有把 -28.2% 當成策略真實風險。若你不同意這個詮釋，或想把成交金額改回還原價算法，告訴我。
+- 完整流程已在 2026-10-15 跑完並推上 `main`：資料 1,973 檔、2000-01-03 .. 2026-10-15；
+  `results/`、`docs/index.html`、README 數字都已更新。資料快照在 `data` branch。

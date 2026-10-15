@@ -1,7 +1,7 @@
 # 雲端 container 的限制
 
 - container 是暫時的：閒置一段時間或 session 結束就回收，`data/` 等未 push 的東西會消失。
-  所以資料靠 Release 快照（見 [data.md](data.md)），程式碼與記憶靠 push。
+  所以資料靠 `data` branch 快照（見 [data.md](data.md)），程式碼與記憶靠 push。
 - 網路走 allowlist。使用者已加入：`query1.finance.yahoo.com`、`query2.finance.yahoo.com`、
   `fc.yahoo.com`、`isin.twse.com.tw`。其他資料來源（FinMind、TPEx OpenAPI 等）要先請使用者加。
   改設定立即生效，不必重開 session。

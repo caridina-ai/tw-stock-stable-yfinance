@@ -9,16 +9,16 @@
       它在 `~/.claude/CLAUDE.md`（使用者層級記憶，每個 session 自動載入）放一個指標，
       讓新 session 自己去讀 `sidecar`，你就不必每次在提示詞裡交代流程：
 
-      ```bash
-      mkdir -p ~/.claude
-      cat > ~/.claude/CLAUDE.md <<'MD'
-      # caridina-ai/tw-stock-stable-yfinance
-      若工作目錄是這個 repo：開工前先執行
-        git fetch origin sidecar:refs/remotes/origin/sidecar
-        git worktree add -B sidecar ../sidecar origin/sidecar
-      然後讀 ../sidecar/CLAUDE.md 並完全照它做（含 memory/、CALLBACK.md、setup.py）。
-      MD
-      ```
+```bash
+mkdir -p ~/.claude
+cat > ~/.claude/CLAUDE.md <<'MD'
+# caridina-ai/tw-stock-stable-yfinance
+若工作目錄是這個 repo：開工前先執行
+  git fetch origin sidecar:refs/remotes/origin/sidecar
+  git worktree add -B sidecar ../sidecar origin/sidecar
+然後讀 ../sidecar/CLAUDE.md 並完全照它做（含 memory/、CALLBACK.md、setup.py）。
+MD
+```
 
       設好後，新 session 的提示詞只要寫「執行 FIAT-{feature}」即可。
       **尚未驗證**：setup script 是否在 Claude 讀取 `~/.claude/CLAUDE.md` 之前執行。

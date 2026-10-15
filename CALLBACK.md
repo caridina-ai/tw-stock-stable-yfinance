@@ -24,8 +24,10 @@ MD
       **尚未驗證**：setup script 是否在 Claude 讀取 `~/.claude/CLAUDE.md` 之前執行。
       第一次用時請在提示詞後加一句「並告訴我你有沒有從 ~/.claude/CLAUDE.md 讀到 sidecar 指示」確認；
       若沒讀到，就退回在提示詞裡寫「請讀 sidecar branch 的 CLAUDE.md」。
-- [ ] **（優先）刪除 public repo 上的 `data` branch**：裡面是 Yahoo 股價，現在已搬到 private 的
-      `tw-stock-stable-yfinance-data`，這個 branch 不再使用。proxy 不讓我刪，請到 GitHub → Branches 手動刪。
+- [ ] **刪除 public repo 上的 `data` branch**：原本放 Yahoo 股價（244 MB），已搬到 private 的
+      `tw-stock-stable-yfinance-data`。我已把它 force push 成空的 commit（`e5c0dd0`），資料不再能從
+      branch 取得；proxy 不讓我刪 branch，請到 GitHub → Branches 手動刪。
+      `main` 的歷史從沒 commit 過 `data/`（整段歷史只有 8 MB），不需要清。
 
 ## 要本尊知道的事
 

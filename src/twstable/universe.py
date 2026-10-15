@@ -8,6 +8,7 @@ TDRs, preferred shares and beneficiary certificates stay out of the universe.
 from __future__ import annotations
 
 import io
+import time
 
 import pandas as pd
 import requests
@@ -32,13 +33,31 @@ _HEADERS = {
 }
 
 
+# The ISIN server rejects a request that follows another too closely with a
+# tiny "FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED" page (HTTP 200, no
+# table).  Space the two listings out, and back off when blocked anyway.
+_PAUSE_BETWEEN_PAGES = 15.0
+_BLOCKED_BACKOFF = (30.0, 60.0, 120.0, 240.0)
+
+
+def _get_page(mode: int, timeout: int = 60) -> str:
+    """Fetch one ISIN listing page, retrying while the server blocks us."""
+    for wait in (*_BLOCKED_BACKOFF, None):
+        resp = requests.get(ISIN_URL.format(mode=mode), headers=_HEADERS, timeout=timeout)
+        resp.raise_for_status()
+        # The page is served as Big5/MS950 regardless of what the header claims.
+        resp.encoding = "ms950"
+        if "<table" in resp.text.lower() and "FOR SECURITY REASONS" not in resp.text:
+            return resp.text
+        if wait is None:
+            break
+        time.sleep(wait)
+    raise RuntimeError(f"ISIN server keeps blocking strMode={mode}; try again later")
+
+
 def _fetch_mode(mode: int, timeout: int = 60) -> pd.DataFrame:
     """Download and parse one ISIN listing page."""
-    resp = requests.get(ISIN_URL.format(mode=mode), headers=_HEADERS, timeout=timeout)
-    resp.raise_for_status()
-    # The page is served as Big5/MS950 regardless of what the header claims.
-    resp.encoding = "ms950"
-    raw = pd.read_html(io.StringIO(resp.text))[0]
+    raw = pd.read_html(io.StringIO(_get_page(mode, timeout)), flavor="lxml")[0]
 
     raw.columns = ["code_name", "isin", "listed_date", "market", "industry", "cfi", "note"]
     raw = raw[raw["cfi"] == COMMON_STOCK_CFI].copy()
@@ -60,7 +79,11 @@ def _fetch_mode(mode: int, timeout: int = 60) -> pd.DataFrame:
 def fetch_universe(include_otc: bool = True) -> pd.DataFrame:
     """Return every Taiwanese ordinary share as a tidy DataFrame."""
     modes = [2, 4] if include_otc else [2]
-    frames = [_fetch_mode(m) for m in modes]
+    frames = []
+    for i, m in enumerate(modes):
+        if i:
+            time.sleep(_PAUSE_BETWEEN_PAGES)
+        frames.append(_fetch_mode(m))
     out = pd.concat(frames, ignore_index=True)
     # A handful of ids are numeric-with-letter (e.g. "2841A"); keep 4-digit ids only,
     # which is what yfinance can resolve.

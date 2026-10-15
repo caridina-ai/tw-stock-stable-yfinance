@@ -2,24 +2,30 @@
 
 ## 內容
 
-`data/` 被 `.gitignore` 排除。`python -m twstable fetch` 產生：
+`data/` 在 `main` 被 `.gitignore` 排除；它本身是 private repo `caridina-ai/tw-stock-stable-yfinance-data` 的 clone。
+`python -m twstable fetch` 產生：
 
 - `universe.csv` — 證交所 ISIN 服務的上市（strMode=2）＋上櫃（strMode=4）普通股，約 1,980 檔。
 - `prices/<TICKER>.parquet` — 每檔原始 OHLCV + `Adj Close`（yfinance `auto_adjust=False`）。
 - `panel.parquet`、`panel_dvol.parquet`、`panel_bench.parquet` — 分析用寬表。
 - `SNAPSHOT.json` — 由 `setup.py publish` 寫入，記錄快照的日期範圍與檔數。
 
-## 快照（orphan branch `data`）
+全部（含 panel）都 commit 在 data repo，clone 下來即可用，不必重建。
 
-雲端 session **不能建立 GitHub Release**（proxy 回 403 "not permitted for this session type"），
-但能 push，所以快照放在 orphan branch `data`。
+## 版本對應（data.lock）
 
-- 還原：`python3 ../sidecar/setup.py`（只在 `data/panel.parquet` 不存在時動作）：
-  `git fetch --depth 1 origin data` → `git archive | tar -x -C data/` → `build_panel()`。實測重建的 panel 與原檔逐位元相同。
-- 發佈：`uv run python ../sidecar/setup.py publish`。用臨時 index 把 `data/` 的
-  `prices/`、`universe.csv`、`SNAPSHOT.json`（約 250 MB）做成**單一無歷史 commit**，`--force` 推到 `data`。
-  repo 永遠只留一份快照；`panel*.parquet` 是衍生檔不存。
-- `fetch` 對已快取的檔案**不會增量更新**；要更新到最新日期得 `fetch --refresh`（全部重抓，約 6 分鐘下載＋清單）。
+- 為什麼不放 `main`：`main` 是 public（要分享給朋友），Yahoo 股價不宜公開散布；也不放 GitHub Release
+  （雲端 session 建立 Release 會被 proxy 擋，403）。
+- `main` 的 `data.lock`（`repo=`、`commit=`、`dates=`、`symbols=`）釘住結果所用的 data commit。
+  等於手寫的 submodule；沒用真 submodule 是為了讓沒有 data repo 權限的人 clone `main` 不出錯。
+- 還原：`python3 ../sidecar/setup.py`。全新 clone 會 `--no-checkout` 再 `checkout -f --detach <commit>`；
+  既有 clone 若有未 commit 的變動（例如剛 fetch 完還沒 publish）會**拒絕切換**，避免把新資料洗掉。
+  實測從 GitHub 還原約 17 秒，檔案與來源逐位元相同。
+- 發佈：`uv run python ../sidecar/setup.py publish`（需要 data repo 的 push 權限）。
+- 成本：Yahoo 每遇除息就改寫整段 `Adj Close`，所以 `fetch --refresh` 後幾乎每個檔案都變，
+  git 無法只存差異，每次發佈 data repo 約多 350 MB。重抓要有理由。
+  若哪天要頻繁更新，考慮改存「原始價 + 除權息事件」、自己算還原，讓舊年份檔案不變。
+- `fetch` 對已快取的檔案**不會增量更新**；要更新到最新日期得 `fetch --refresh`（全部重抓）。
 
 ## 還原股價
 

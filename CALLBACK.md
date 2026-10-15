@@ -24,12 +24,8 @@ MD
       **尚未驗證**：setup script 是否在 Claude 讀取 `~/.claude/CLAUDE.md` 之前執行。
       第一次用時請在提示詞後加一句「並告訴我你有沒有從 ~/.claude/CLAUDE.md 讀到 sidecar 指示」確認；
       若沒讀到，就退回在提示詞裡寫「請讀 sidecar branch 的 CLAUDE.md」。
-- [ ] **資料快照改放 orphan branch `data`，不是 Release**：雲端 session 建立 Release 會被 proxy 擋（403
-      "not permitted for this session type"）。`data` branch 只有一個無歷史 commit（約 250 MB），每次發佈用
-      force push 覆蓋，repo 不會越長越大。
-      注意：repo 是 public，這份 Yahoo 股價任何人都能下載，而 Yahoo 的使用條款限制轉散布。
-      介意的話把 repo 改 private（`setup.py` 走 git，改 private 後照樣能用）。
-      另外，完整 `git clone`（不加 `--single-branch`）會連 `data` 一起抓下來。
+- [ ] **（優先）刪除 public repo 上的 `data` branch**：裡面是 Yahoo 股價，現在已搬到 private 的
+      `tw-stock-stable-yfinance-data`，這個 branch 不再使用。proxy 不讓我刪，請到 GitHub → Branches 手動刪。
 
 ## 要本尊知道的事
 
@@ -40,4 +36,4 @@ MD
       我把 README 和報告改成「這次躲過了，但靠的是不穩的門檻」，兩個結果並列，
       沒有把 -28.2% 當成策略真實風險。若你不同意這個詮釋，或想把成交金額改回還原價算法，告訴我。
 - 完整流程已在 2026-10-15 跑完並推上 `main`：資料 1,973 檔、2000-01-03 .. 2026-10-15；
-  `results/`、`docs/index.html`、README 數字都已更新。資料快照在 `data` branch。
+  `results/`、`docs/index.html`、README 數字都已更新。資料在 private repo `tw-stock-stable-yfinance-data`，由 `main` 的 `data.lock` 釘住版本。

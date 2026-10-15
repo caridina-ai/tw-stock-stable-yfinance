@@ -11,8 +11,8 @@
 
 ## 快照（GitHub Release）
 
-- 還原：`python3 ../setup/setup.py`（只在 `data/panel.parquet` 不存在時下載）。
-- 發佈：`uv run python ../setup/setup.py publish`，在 repo 建立 tag `data-YYYYMMDD` 的 Release，
+- 還原：`python3 ../sidecar/setup.py`（只在 `data/panel.parquet` 不存在時下載）。
+- 發佈：`uv run python ../sidecar/setup.py publish`，在 repo 建立 tag `data-YYYYMMDD` 的 Release，
   附上 `data-YYYYMMDD.tar.gz`。同一天重發會因 tag 已存在而失敗，先刪舊 Release 或隔天再發。
 - `fetch` 對已快取的檔案**不會增量更新**；要更新到最新日期得 `fetch --refresh`（全部重抓）。
 
@@ -26,6 +26,7 @@
 - 證交所 ISIN 頁**連續請求會被擋**：回 HTTP 200 但內容是
   "FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED"（約 800 bytes），
   pandas 會報誤導性的 `Import html5lib failed`。`universe.py` 已加 15 秒間隔與退避重試。
-  除錯時別手動狂打這兩頁。
+  除錯時別手動狂打這兩頁。實測被擋時可能要退避好幾輪，`fetch --refresh-universe` 光清單就花了約 10 分鐘。
+- `fetch` 的 stdout 被重導到檔案時是 block-buffered，進度要看 tqdm（stderr）或 `ls data/prices | wc -l`。
 - 直接 curl Yahoo chart API 會 429（沒有 cookie/crumb）；用 yfinance 正常。
 - Yahoo 台股日線從 2000-01-04 開始；上櫃 2008 年以前沒有日線。

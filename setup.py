@@ -3,8 +3,8 @@
 
 Run from the main checkout (the ``main`` branch working tree)::
 
-    python3 ../setup/setup.py            # install deps, restore data/ if missing
-    python3 ../setup/setup.py publish    # snapshot data/ to a GitHub Release
+    python3 ../sidecar/setup.py            # install deps, restore data/ if missing
+    python3 ../sidecar/setup.py publish    # snapshot data/ to a GitHub Release
 
 ``data/`` (prices downloaded from Yahoo / the TWSE universe) is git-ignored and
 takes a long time to re-download, so snapshots live as GitHub Release assets
@@ -125,7 +125,7 @@ def publish_data(root: Path) -> None:
         body = (
             f"Snapshot of data/ ({info['symbols']} symbols, "
             f"{info['dates'][0]} .. {info['dates'][1]}). "
-            "Restore with `python3 ../setup/setup.py` from the setup branch."
+            "Restore with `python3 ../sidecar/setup.py` from the sidecar branch."
         )
         rel = json.loads(run(
             ["gh", "api", "--method", "POST", f"repos/{REPO}/releases",

@@ -4,14 +4,19 @@
 Run from the main checkout (the ``main`` branch working tree)::
 
     python3 ../sidecar/setup.py            # install deps, restore data/ if missing
-    python3 ../sidecar/setup.py publish    # snapshot data/ to a GitHub Release
+    uv run python ../sidecar/setup.py publish   # snapshot data/ to the `data` branch
 
 ``data/`` (prices downloaded from Yahoo / the TWSE universe) is git-ignored and
-takes a long time to re-download, so snapshots live as GitHub Release assets
-tagged ``data-YYYYMMDD``.  ``restore`` (the default) picks the newest one.
+takes a long time to re-download, so a snapshot lives on the orphan branch
+``data``.  Cloud sessions cannot create GitHub Releases (the git proxy answers
+403), but they can push, so the branch is the transport.
+
+Each publish force-pushes a *single, history-less* commit, so the repository
+only ever carries one snapshot.  Only the raw inputs are stored
+(``prices/``, ``universe.csv``, ``SNAPSHOT.json``); the ``panel*.parquet``
+files are derived and rebuilt on restore in about 20 seconds.
 
 Safe to re-run: every step is skipped when its result is already in place.
-Uses only the standard library plus ``curl``, ``uv`` and (for publish) ``gh``.
 """
 
 from __future__ import annotations
@@ -19,16 +24,16 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 from pathlib import Path
 
-REPO = "caridina-ai/tw-stock-stable-yfinance"
-TAG_PREFIX = "data-"
-ASSET_SUFFIX = ".tar.gz"
+DATA_BRANCH = "data"
+DATA_REF = f"refs/remotes/origin/{DATA_BRANCH}"
+STORED = ["prices", "universe.csv", "SNAPSHOT.json"]
 MARKER = "panel.parquet"  # present once data/ is usable
 
 
@@ -57,37 +62,28 @@ def install_deps(root: Path) -> None:
     run(["uv", "sync"], cwd=root)
 
 
-def latest_snapshot() -> tuple[str, str] | None:
-    """(tag, asset download URL) of the newest data snapshot, or None."""
-    out = subprocess.run(
-        ["curl", "-sSfL", f"https://api.github.com/repos/{REPO}/releases?per_page=100"],
-        check=True, capture_output=True, text=True,
-    ).stdout
-    releases = [r for r in json.loads(out) if r["tag_name"].startswith(TAG_PREFIX)]
-    for rel in sorted(releases, key=lambda r: r["tag_name"], reverse=True):
-        for asset in rel["assets"]:
-            if asset["name"].endswith(ASSET_SUFFIX):
-                return rel["tag_name"], asset["browser_download_url"]
-    return None
-
-
 def restore_data(root: Path) -> None:
     data = root / "data"
     if (data / MARKER).exists():
         print(f"data/ already present ({data / MARKER}); skipping restore")
         return
-    snap = latest_snapshot()
-    if snap is None:
-        print("no data snapshot release found; run `python -m twstable fetch` instead")
+    try:
+        run(["git", "fetch", "--depth", "1", "origin", f"{DATA_BRANCH}:{DATA_REF}"], cwd=root)
+    except subprocess.CalledProcessError:
+        print(f"no `{DATA_BRANCH}` branch on origin; run `python -m twstable fetch` instead")
         return
-    tag, url = snap
-    with tempfile.TemporaryDirectory() as tmp:
-        archive = Path(tmp) / "data.tar.gz"
-        run(["curl", "-sSfL", "-o", str(archive), url])
-        with tarfile.open(archive) as tar:
-            tar.extractall(root, filter="data")
+
+    data.mkdir(exist_ok=True)
+    archive = subprocess.Popen(["git", "archive", DATA_REF], cwd=root, stdout=subprocess.PIPE)
+    run(["tar", "-x", "-C", str(data)], stdin=archive.stdout)
+    archive.stdout.close()
+    if archive.wait() != 0:
+        sys.exit("git archive failed")
+
+    print("rebuilding panel from restored prices ...", flush=True)
+    run(["uv", "run", "python", "-c", "from twstable.data import build_panel; build_panel()"],
+        cwd=root)
     info = data / "SNAPSHOT.json"
-    print(f"restored data/ from {tag}")
     if info.exists():
         print(info.read_text("utf-8"))
 
@@ -105,43 +101,27 @@ def publish_data(root: Path) -> None:
     import pandas as pd  # only needed here, from the project venv
 
     close = pd.read_parquet(data / MARKER)
-    today = dt.date.today().strftime("%Y%m%d")
-    tag = f"{TAG_PREFIX}{today}"
     info = {
-        "tag": tag,
         "created": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "dates": [str(close.index[0].date()), str(close.index[-1].date())],
         "symbols": int(close.shape[1]),
     }
     (data / "SNAPSHOT.json").write_text(json.dumps(info, indent=2) + "\n", "utf-8")
 
+    # Build the commit with a throwaway index whose work tree is data/, so the
+    # main checkout's index and .gitignore (which ignores data/) are untouched.
     with tempfile.TemporaryDirectory() as tmp:
-        archive = Path(tmp) / f"data-{today}{ASSET_SUFFIX}"
-        with tarfile.open(archive, "w:gz") as tar:
-            tar.add(data, arcname="data")
-        size = archive.stat().st_size / 2**20
-        print(f"packed {archive.name}: {size:.1f} MiB")
-
-        body = (
-            f"Snapshot of data/ ({info['symbols']} symbols, "
-            f"{info['dates'][0]} .. {info['dates'][1]}). "
-            "Restore with `python3 ../sidecar/setup.py` from the sidecar branch."
-        )
-        rel = json.loads(run(
-            ["gh", "api", "--method", "POST", f"repos/{REPO}/releases",
-             "-f", f"tag_name={tag}", "-f", "target_commitish=main",
-             "-f", f"name=Data snapshot {today}", "-f", f"body={body}"],
-            capture_output=True, text=True,
-        ).stdout)
-        run(
-            ["gh", "api", "--method", "POST",
-             "-H", "Content-Type: application/gzip",
-             f"https://uploads.github.com/repos/{REPO}/releases/{rel['id']}/assets"
-             f"?name={archive.name}",
-             "--input", str(archive)],
-            stdout=subprocess.DEVNULL,
-        )
-    print(f"published {tag}: {rel['html_url']}")
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        git = ["git", f"--work-tree={data}"]
+        run([*git, "add", "--", *STORED], cwd=root, env=env)
+        tree = run([*git, "write-tree"], cwd=root, env=env,
+                   capture_output=True, text=True).stdout.strip()
+    msg = (f"data snapshot: {info['symbols']} symbols, "
+           f"{info['dates'][0]} .. {info['dates'][1]}")
+    commit = run(["git", "commit-tree", tree, "-m", msg], cwd=root,
+                 capture_output=True, text=True).stdout.strip()
+    run(["git", "push", "--force", "origin", f"{commit}:refs/heads/{DATA_BRANCH}"], cwd=root)
+    print(f"published {msg}")
 
 
 def main() -> int:

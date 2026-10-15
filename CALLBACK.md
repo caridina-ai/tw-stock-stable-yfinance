@@ -24,8 +24,12 @@ MD
       **尚未驗證**：setup script 是否在 Claude 讀取 `~/.claude/CLAUDE.md` 之前執行。
       第一次用時請在提示詞後加一句「並告訴我你有沒有從 ~/.claude/CLAUDE.md 讀到 sidecar 指示」確認；
       若沒讀到，就退回在提示詞裡寫「請讀 sidecar branch 的 CLAUDE.md」。
-- [ ] **決定 Release 資料快照是否公開**：repo 是 public，`data-*` Release 裡的 Yahoo 股價任何人都能下載，
-      Yahoo 的使用條款限制轉散布。介意的話把 repo 改 private，並請 Claude 把 `setup.py` 改用 `gh api` 認證下載。
+- [ ] **資料快照改放 orphan branch `data`，不是 Release**：雲端 session 建立 Release 會被 proxy 擋（403
+      "not permitted for this session type"）。`data` branch 只有一個無歷史 commit（約 250 MB），每次發佈用
+      force push 覆蓋，repo 不會越長越大。
+      注意：repo 是 public，這份 Yahoo 股價任何人都能下載，而 Yahoo 的使用條款限制轉散布。
+      介意的話把 repo 改 private（`setup.py` 走 git，改 private 後照樣能用）。
+      另外，完整 `git clone`（不加 `--single-branch`）會連 `data` 一起抓下來。
 
 ## 進行中（若這段還在，代表上一個 session 沒跑完，下個 session 請接手）
 

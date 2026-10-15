@@ -9,12 +9,17 @@
 - `panel.parquet`、`panel_dvol.parquet`、`panel_bench.parquet` — 分析用寬表。
 - `SNAPSHOT.json` — 由 `setup.py publish` 寫入，記錄快照的日期範圍與檔數。
 
-## 快照（GitHub Release）
+## 快照（orphan branch `data`）
 
-- 還原：`python3 ../sidecar/setup.py`（只在 `data/panel.parquet` 不存在時下載）。
-- 發佈：`uv run python ../sidecar/setup.py publish`，在 repo 建立 tag `data-YYYYMMDD` 的 Release，
-  附上 `data-YYYYMMDD.tar.gz`。同一天重發會因 tag 已存在而失敗，先刪舊 Release 或隔天再發。
-- `fetch` 對已快取的檔案**不會增量更新**；要更新到最新日期得 `fetch --refresh`（全部重抓）。
+雲端 session **不能建立 GitHub Release**（proxy 回 403 "not permitted for this session type"），
+但能 push，所以快照放在 orphan branch `data`。
+
+- 還原：`python3 ../sidecar/setup.py`（只在 `data/panel.parquet` 不存在時動作）：
+  `git fetch --depth 1 origin data` → `git archive | tar -x -C data/` → `build_panel()`。實測重建的 panel 與原檔逐位元相同。
+- 發佈：`uv run python ../sidecar/setup.py publish`。用臨時 index 把 `data/` 的
+  `prices/`、`universe.csv`、`SNAPSHOT.json`（約 250 MB）做成**單一無歷史 commit**，`--force` 推到 `data`。
+  repo 永遠只留一份快照；`panel*.parquet` 是衍生檔不存。
+- `fetch` 對已快取的檔案**不會增量更新**；要更新到最新日期得 `fetch --refresh`（全部重抓，約 6 分鐘下載＋清單）。
 
 ## 還原股價
 

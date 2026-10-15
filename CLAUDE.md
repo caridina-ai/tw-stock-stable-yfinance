@@ -7,7 +7,7 @@
 |---|---|---|
 | `CLAUDE.md` | Claude | 本檔：每個 session 的開工／收工流程 |
 | `memory/` | Claude | 分層記憶，入口 `memory/MEMORY.md` |
-| `setup.py` | Claude | 安裝相依套件、從 GitHub Release 還原 `data/` |
+| `setup.py` | Claude | 安裝相依套件、從 orphan branch `data` 還原 `data/` |
 | `CALLBACK.md` | Claude 寫、使用者清 | 需要使用者（本尊）注意或親手處理的事 |
 | `genesis/` | 使用者 | 新需求 `FIAT-{feature}.md` 與目錄 `README.md` |
 

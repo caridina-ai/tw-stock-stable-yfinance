@@ -1,0 +1,1461 @@
+<!doctype html>
+<!--
+  Holdings viewer. `twstable viewer` copies this file verbatim to
+  docs/viewer/index.html next to the data it reads (data/meta.json,
+  data/exp/<id>.json, data/px/<stock>.json). No build step, no CDN.
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="台股長期穩定上漲選股策略：每次換股的候選排行榜、成分股的加入與汰除，以及每檔股票的分數怎麼算出來。">
+<title>持股變化 Viewer — 長期穩定上漲股策略</title>
+<script>
+  (() => {
+    const KEY = "twstable-theme";
+    try {
+      const saved = localStorage.getItem(KEY);
+      if (saved === "dark" || saved === "light") {
+        document.documentElement.setAttribute("data-theme", saved);
+      }
+    } catch (e) { /* private mode: fall back to the OS preference */ }
+    window.__toggleTheme = () => {
+      const de = document.documentElement;
+      const dark = de.getAttribute("data-theme")
+        ? de.getAttribute("data-theme") === "dark"
+        : window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const next = dark ? "light" : "dark";
+      de.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) { /* ignore */ }
+      window.dispatchEvent(new Event("themechange"));
+    };
+  })();
+</script>
+<style>
+  /* ── tokens ─────────────────────────────────────────────────────────
+     Surfaces and series hues follow the report (docs/index.html).
+     Candles use the Taiwan convention: red up, green down. Held names
+     run yellow -> red with tenure; dropped names fade out of green. */
+  :root {
+    color-scheme: light;
+    --plane:    #f9f9f7;
+    --surface:  #fcfcfb;
+    --ink:      #0b0b0b;
+    --ink-2:    #52514e;
+    --muted:    #898781;
+    --grid:     #e8e7e1;
+    --axis:     #c3c2b7;
+    --hairline: rgba(11, 11, 11, 0.10);
+    --s1:       #2a78d6;
+    --s2:       #eb6834;
+    --violet:   #6250d6;
+    --up:       #e34948;
+    --down:     #008300;
+    --shade:    rgba(42, 120, 214, 0.08);
+    --cursor:   #0b0b0b;
+    --tip-bg:   rgba(252, 252, 251, 0.97);
+    --row-alpha: 0.55;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plane:    #0d0d0d;
+      --surface:  #1a1a19;
+      --ink:      #ffffff;
+      --ink-2:    #c3c2b7;
+      --muted:    #898781;
+      --grid:     #2a2a28;
+      --axis:     #383835;
+      --hairline: rgba(255, 255, 255, 0.10);
+      --s1:       #3987e5;
+      --s2:       #d95926;
+      --violet:   #9085e9;
+      --up:       #e66767;
+      --down:     #0ca30c;
+      --shade:    rgba(57, 135, 229, 0.13);
+      --cursor:   #ffffff;
+      --tip-bg:   rgba(26, 26, 25, 0.97);
+      --row-alpha: 0.40;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:    #0d0d0d;
+    --surface:  #1a1a19;
+    --ink:      #ffffff;
+    --ink-2:    #c3c2b7;
+    --muted:    #898781;
+    --grid:     #2a2a28;
+    --axis:     #383835;
+    --hairline: rgba(255, 255, 255, 0.10);
+    --s1:       #3987e5;
+    --s2:       #d95926;
+    --violet:   #9085e9;
+    --up:       #e66767;
+    --down:     #0ca30c;
+    --shade:    rgba(57, 135, 229, 0.13);
+    --cursor:   #ffffff;
+    --tip-bg:   rgba(26, 26, 25, 0.97);
+    --row-alpha: 0.40;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans TC",
+                 "Microsoft JhengHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ── app shell ── */
+  .app {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 620px;
+  }
+  .top {
+    display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--hairline);
+    background: var(--surface);
+  }
+  .brand { display: flex; align-items: baseline; gap: 12px; margin-right: auto; }
+  .brand h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  .brand a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  .brand a:hover { color: var(--ink); }
+  .exp-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+  .exp-tabs button {
+    border: 1px solid var(--hairline); background: transparent;
+    border-radius: 999px; padding: 3px 11px; font-size: 12.5px; cursor: pointer;
+    color: var(--ink-2); white-space: nowrap;
+  }
+  .exp-tabs button:hover { color: var(--ink); border-color: var(--axis); }
+  .exp-tabs button[aria-selected="true"] {
+    background: var(--ink); color: var(--surface); border-color: var(--ink);
+  }
+  .exp-tabs kbd { font: inherit; opacity: 0.55; margin-right: 4px; border: 0; background: none; padding: 0; }
+  .icon-btn {
+    width: 30px; height: 30px; border-radius: 8px;
+    border: 1px solid var(--hairline); background: transparent; cursor: pointer;
+    color: var(--ink-2); display: grid; place-items: center; padding: 0;
+  }
+  .icon-btn:hover { color: var(--ink); }
+
+  .main {
+    display: grid;
+    grid-template-columns: minmax(330px, 400px) 1fr;
+    min-height: 0;
+  }
+
+  /* ── ranking panel ── */
+  .rank-panel {
+    display: flex; flex-direction: column; min-height: 0;
+    border-right: 1px solid var(--hairline);
+    background: var(--surface);
+  }
+  .month-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px 2px;
+  }
+  .month-bar .icon-btn { flex: none; }
+  .month-title { flex: 1; text-align: center; }
+  .month-title b { font-size: 18px; letter-spacing: -0.01em; }
+  .month-title span { display: block; font-size: 12px; color: var(--muted); }
+  .month-sub {
+    padding: 2px 14px 8px; font-size: 12px; color: var(--ink-2);
+    display: flex; flex-wrap: wrap; gap: 2px 12px; justify-content: center;
+  }
+  .month-sub .in { color: var(--up); }
+  .month-sub .out { color: var(--down); }
+  .rank-head, .row {
+    display: grid;
+    grid-template-columns: 30px 44px minmax(0, 1fr) 88px 46px 66px;
+    align-items: center; gap: 0 6px;
+    padding: 0 10px 0 8px;
+  }
+  .rank-head {
+    font-size: 11px; color: var(--muted); padding-top: 4px; padding-bottom: 4px;
+    border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);
+  }
+  .rank-head span:nth-child(1), .row .rk { text-align: right; }
+  .rank-head span:nth-child(5), .row .wt { text-align: right; }
+  .rank-list { overflow-y: auto; flex: 1; min-height: 0; outline: none; padding: 3px 0 10px; }
+  .row {
+    position: relative; height: 26px; font-size: 13px; cursor: pointer;
+    background: var(--tint, transparent);
+    box-shadow: inset 4px 0 0 var(--swatch, transparent);
+  }
+  .row:hover { box-shadow: inset 4px 0 0 var(--swatch, transparent), inset 0 0 0 1px var(--axis); }
+  .row.sel { box-shadow: inset 0 0 0 2px var(--cursor), inset 6px 0 0 var(--swatch, var(--cursor)); }
+  .row.sel::before {
+    content: "▶"; position: absolute; left: 7px; top: 50%; transform: translateY(-50%);
+    font-size: 9px; color: var(--cursor);
+  }
+  .row .rk { color: var(--ink-2); font-size: 12px; }
+  .row .code { color: var(--ink-2); font-size: 12px; }
+  .row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .sc { display: flex; align-items: center; gap: 5px; }
+  .row .sc i {
+    display: block; height: 6px; border-radius: 0 3px 3px 0;
+    background: var(--ink-2); opacity: 0.45; flex: none;
+  }
+  .row .sc b { font-weight: 500; font-size: 12px; }
+  .row .wt { font-size: 12px; }
+  .row .st { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
+  .row.held .name { font-weight: 650; }
+  .row.pinned { border-bottom: 1px dashed var(--axis); margin-bottom: 4px; }
+  .divider {
+    font-size: 10.5px; color: var(--muted); padding: 4px 10px 2px 44px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .divider::after { content: ""; flex: 1; border-top: 1px dashed var(--axis); }
+  .legend {
+    border-top: 1px solid var(--hairline);
+    padding: 8px 14px 10px; font-size: 11.5px; color: var(--ink-2);
+    display: grid; grid-template-columns: auto 1fr auto; gap: 4px 8px; align-items: center;
+  }
+  .legend .ramp { height: 9px; border-radius: 2px; }
+
+  /* ── detail panel ── */
+  .detail {
+    display: grid;
+    grid-template-rows: auto auto 1fr auto;
+    min-height: 0; min-width: 0;
+  }
+  .summary {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+    gap: 8px 18px; padding: 10px 16px 8px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .exp-note { font-size: 12.5px; color: var(--ink-2); margin: 0 0 6px; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .tile { min-width: 70px; }
+  .tile .k { font-size: 11px; color: var(--muted); }
+  .tile .v { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+  .tile .v small { font-size: 11.5px; font-weight: 500; color: var(--ink-2); margin-left: 3px; }
+  .mini-wrap { position: relative; min-height: 96px; }
+  .mini-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+
+  .stock-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px;
+    padding: 8px 16px 2px;
+  }
+  .stock-head .title { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  .stock-head .title small { font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .stock-head .facts { font-size: 12.5px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 2px 14px; }
+  .stock-head .facts b { color: var(--ink); font-weight: 650; }
+  .chips { margin-left: auto; display: flex; gap: 6px; align-items: baseline; }
+  .view-note { font-size: 11.5px; color: var(--muted); margin-right: 4px; }
+  .chip {
+    border: 1px solid var(--hairline); border-radius: 6px; padding: 1px 8px;
+    font-size: 12px; background: transparent; cursor: pointer; color: var(--ink-2);
+  }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+
+  .chart-wrap { position: relative; min-height: 300px; }
+  .chart-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .status {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--muted); font-size: 13px; pointer-events: none;
+  }
+  .tip {
+    position: absolute; pointer-events: none; z-index: 5;
+    background: var(--tip-bg); border: 1px solid var(--hairline); border-radius: 7px;
+    padding: 6px 9px; font-size: 12px; line-height: 1.45; white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    opacity: 0; transition: opacity 80ms;
+  }
+  .tip.on { opacity: 1; }
+  .tip .t { color: var(--muted); font-size: 11px; }
+
+  .score-info {
+    border-top: 1px solid var(--hairline);
+    padding: 7px 16px 9px; font-size: 12.5px; color: var(--ink-2);
+    display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline;
+  }
+  .score-info b { color: var(--ink); font-weight: 650; }
+  .score-info .eq { font-size: 13.5px; }
+  .score-info .why { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+  .keys { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+  kbd {
+    font-family: inherit; font-size: 11px; padding: 0 4px; border-radius: 4px;
+    border: 1px solid var(--hairline); background: var(--plane);
+  }
+
+  /* ── touch controls (no keyboard) ── */
+  .pad { display: none; }
+
+  /* ── help ── */
+  .help {
+    position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+    background: rgba(0,0,0,0.35);
+  }
+  .help[hidden] { display: none; }
+  .help .card {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+    padding: 20px 24px; max-width: 560px; width: calc(100% - 32px);
+    max-height: calc(100% - 32px); overflow: auto;
+  }
+  .help h2 { font-size: 16px; margin: 0 0 10px; }
+  .help dl { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 13px; }
+  .help dt { text-align: right; }
+  .help p { font-size: 13px; color: var(--ink-2); margin: 8px 0; }
+
+  @media (max-width: 900px) {
+    .app { height: auto; }
+    .main { grid-template-columns: 1fr; }
+    .rank-panel { border-right: 0; border-bottom: 1px solid var(--hairline); max-height: 62vh; }
+    .detail { grid-template-rows: auto auto 62vh auto; }
+    .summary { grid-template-columns: 1fr; }
+    .mini-wrap { height: 110px; }
+    .keys { display: none; }
+    .pad {
+      display: flex; gap: 6px; padding: 6px 16px; justify-content: center;
+      position: sticky; bottom: 0; background: var(--surface);
+      border-top: 1px solid var(--hairline);
+    }
+    .pad button {
+      min-width: 44px; height: 38px; border-radius: 8px; border: 1px solid var(--hairline);
+      background: var(--plane); cursor: pointer;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>持股變化 Viewer</h1>
+      <a href="../">← 策略報告</a>
+    </div>
+    <nav class="exp-tabs" id="exp-tabs" role="tablist" aria-label="實驗"></nav>
+    <button class="icon-btn" id="help-btn" title="操作說明（?）" aria-label="操作說明">?</button>
+    <button class="icon-btn" title="切換深色 / 淺色" aria-label="切換深色或淺色主題"
+            onclick="window.__toggleTheme()">◐</button>
+  </header>
+
+  <div class="main">
+    <aside class="rank-panel" aria-label="候選排行榜">
+      <div class="month-bar">
+        <button class="icon-btn" id="prev-month" title="上一次換股（←）" aria-label="上一次換股">◀</button>
+        <div class="month-title" id="month-title"></div>
+        <button class="icon-btn" id="next-month" title="下一次換股（→）" aria-label="下一次換股">▶</button>
+      </div>
+      <div class="month-sub" id="month-sub"></div>
+      <div class="rank-head"><span>#</span><span>代號</span><span>名稱</span><span>分數</span><span>權重</span><span>狀態</span></div>
+      <div class="rank-list" id="rank-list" tabindex="0" role="listbox" aria-label="排行榜"></div>
+      <div class="legend" id="legend"></div>
+    </aside>
+
+    <section class="detail">
+      <div class="summary">
+        <div>
+          <p class="exp-note" id="exp-note"></p>
+          <div class="tiles" id="tiles"></div>
+        </div>
+        <div class="mini-wrap" title="點一下跳到該次換股">
+          <canvas id="mini" aria-label="權益曲線"></canvas>
+        </div>
+      </div>
+      <div class="stock-head" id="stock-head"></div>
+      <div class="chart-wrap" id="chart-wrap">
+        <canvas id="chart" aria-label="個股還原股價 K 線與分數"></canvas>
+        <div class="status" id="chart-status"></div>
+        <div class="tip" id="tip"></div>
+      </div>
+      <div class="score-info" id="score-info"></div>
+    </section>
+  </div>
+  <div class="pad" aria-label="操作">
+    <button data-key="ArrowLeft" aria-label="上一次換股">◀</button>
+    <button data-key="ArrowUp" aria-label="上一檔">▲</button>
+    <button data-key="Enter" aria-label="放大或還原">⤢</button>
+    <button data-key="ArrowDown" aria-label="下一檔">▼</button>
+    <button data-key="ArrowRight" aria-label="下一次換股">▶</button>
+  </div>
+</div>
+
+<div class="help" id="help" hidden>
+  <div class="card" role="dialog" aria-label="操作說明">
+    <h2>操作說明</h2>
+    <dl>
+      <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>上一次／下一次換股</dd>
+      <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>排行榜上一檔／下一檔（<kbd>PgUp</kbd> <kbd>PgDn</kbd> 跳 10 檔）</dd>
+      <dt><kbd>Enter</kbd></dt><dd>放大到「回推範圍起點 → 下一次換股」，再按一次回到全範圍</dd>
+      <dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>第一次／最後一次換股</dd>
+      <dt><kbd>1</kbd>–<kbd>7</kbd></dt><dd>切換實驗</dd>
+      <dt><kbd>L</kbd></dt><dd>股價 Y 軸切換對數／線性</dd>
+      <dt><kbd>?</kbd> <kbd>Esc</kbd></dt><dd>開關本說明</dd>
+    </dl>
+    <p><b>排行榜</b>：每次換股時，通過流動性與股價門檻的股票依分數排序的前 50 名，
+      再加上不在前 50 名但仍持有（遲滯規則）或剛被剔除的股票。
+      成分股依「已經連續持有多久」由黃轉紅；被剔除的依「剔除多久了」由深綠漸淡（12 個月後不再上色）。</p>
+    <p><b>K 線</b>：還原股價。藍色底色是當次選股用的回推範圍，藍線是該範圍的對數線性迴歸（延伸到整個畫面），
+      虛線是 ±1σ；放大時橘色短線是「一致性」各子段各自的迴歸。圖下方色帶是這檔股票被持有的期間。
+      下方子圖是這檔股票每次換股算出的分數，Y 軸範圍固定為本實驗所有曾上榜股票的分數範圍，方便比較；
+      虛線是買進門檻。空心點表示當時不符流動性或股價門檻。</p>
+    <p>Walk-forward 實驗每一折的參數不同（回推天數、分數形狀、門檻），所以分數在折與折之間會跳動，
+      這是真的，不是畫錯。分數與排名是程式算的正式值；下方的分項是瀏覽器依存成 0.05% 精度的股價重算，
+      與正式分數可能差千分之幾。</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const DATA = "data/";
+  const TOP = 50;
+  const DAY = 86400000;
+
+  // ── formatting ────────────────────────────────────────────────────
+  const pct = (v, d = 1) => (v == null || !isFinite(v)) ? "–" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(d)}%`;
+  const pctU = (v, d = 1) => (v == null || !isFinite(v)) ? "–" : `${(v * 100).toFixed(d)}%`;
+  const fx = (v, d = 2) => (v == null || !isFinite(v)) ? "–" : v.toFixed(d);
+  const fmtDate = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const fmtPrice = (p) => p >= 1000 ? p.toFixed(0) : p >= 100 ? p.toFixed(1) : p >= 10 ? p.toFixed(2) : p.toFixed(3);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  // ── colours ───────────────────────────────────────────────────────
+  // tenure ramp (months held -> colour) and the dropped-name green
+  const TENURE = [[0, [244, 196, 48]], [3, [242, 160, 49]], [8, [236, 120, 74]],
+                  [15, [227, 73, 72]], [26, [163, 35, 34]]];
+  const DROPPED = [22, 143, 74];
+  const FADE_MONTHS = 12;
+
+  function ramp(stops, x) {
+    if (x <= stops[0][0]) return stops[0][1];
+    for (let i = 1; i < stops.length; i++) {
+      if (x <= stops[i][0]) {
+        const [x0, c0] = stops[i - 1], [x1, c1] = stops[i];
+        const t = (x - x0) / (x1 - x0);
+        return c0.map((v, k) => Math.round(v + (c1[k] - v) * t));
+      }
+    }
+    return stops[stops.length - 1][1];
+  }
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // ── state ─────────────────────────────────────────────────────────
+  const S = {
+    meta: null,
+    days: null,          // calendar: ms since epoch for every bar
+    exps: {},            // loaded experiment data by id
+    exp: null,           // current experiment
+    m: 0,                // rebalance index
+    sid: null,           // selected stock id
+    zoom: false,
+    log: true,
+    px: new Map(),       // stock id -> decoded prices (or a pending Promise)
+    list: [],            // current ranking rows
+  };
+
+  async function getJSON(path) {
+    const r = await fetch(DATA + path);
+    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+    return r.json();
+  }
+
+  // ── prices ────────────────────────────────────────────────────────
+  function decodePrices(p) {
+    const n = S.days.length, k = S.meta.ticks;
+    const C = new Float64Array(n).fill(NaN);
+    const O = new Float64Array(n).fill(NaN);
+    const H = new Float64Array(n).fill(NaN);
+    const L = new Float64Array(n).fill(NaN);
+    let q = null;
+    for (let i = 0; i < p.c.length; i++) {
+      const d = p.c[i];
+      if (d === null) continue;
+      q = q === null ? d : q + d;
+      const bar = p.s + i;
+      C[bar] = Math.exp(q / k);
+      if (p.o && p.o[i] !== null) {
+        O[bar] = Math.exp((q + p.o[i]) / k);
+        H[bar] = Math.exp((q + p.h[i]) / k);
+        L[bar] = Math.exp((q + p.l[i]) / k);
+      }
+    }
+    return { C, O, H, L, first: p.s, last: p.s + p.c.length - 1 };
+  }
+
+  function loadPrices(sid) {
+    if (S.px.has(sid)) return Promise.resolve(S.px.get(sid));
+    const job = getJSON(`px/${sid}.json`).then((p) => {
+      const d = decodePrices(p);
+      S.px.set(sid, d);
+      return d;
+    }).catch((e) => { S.px.delete(sid); throw e; });
+    S.px.set(sid, job);
+    return job;
+  }
+  const pricesNow = (sid) => {
+    const v = S.px.get(sid);
+    return v && !(v instanceof Promise) ? v : null;
+  };
+
+  // ── experiment preparation ───────────────────────────────────────
+  function prepare(exp) {
+    const nM = exp.months.length, nU = exp.union.length;
+    exp.uIndex = new Map(exp.union.map((sid, u) => [sid, u]));
+    exp.weight = Array.from({ length: nU }, () => new Float32Array(nM));
+    for (let m = 0; m < nM; m++) {
+      for (const [u, w] of exp.months[m].h) exp.weight[u][m] = w / 10000;
+    }
+    // run start (held) and drop month (not held) for every name and month
+    exp.since = Array.from({ length: nU }, () => new Int32Array(nM).fill(-1));
+    exp.dropped = Array.from({ length: nU }, () => new Int32Array(nM).fill(-1));
+    exp.heldSet = exp.months.map((mo) => new Set(mo.h.map(([u]) => u)));
+    for (let u = 0; u < nU; u++) {
+      let start = -1, drop = -1;
+      for (let m = 0; m < nM; m++) {
+        if (exp.heldSet[m].has(u)) {
+          if (start < 0) start = m;
+          exp.since[u][m] = start;
+          drop = -1;
+        } else {
+          if (start >= 0) { drop = m; start = -1; }
+          exp.dropped[u][m] = drop;
+        }
+      }
+    }
+    let mx = 0;
+    for (const row of exp.score) for (const v of row) if (v > mx) mx = v;
+    exp.scoreMax = Math.max(0.1, Math.ceil(mx / 100) / 10);
+    // overview x range: from the earliest look-back to the last bar
+    let x0 = Infinity;
+    for (const mo of exp.months) {
+      const w = exp.segments[mo.g].params.score.window;
+      x0 = Math.min(x0, mo.s - w + 1);
+    }
+    exp.x0 = Math.max(0, x0);
+    exp.x1 = S.days.length - 1;
+    return exp;
+  }
+
+  const monthsBetween = (a, b) => (S.days[b] - S.days[a]) / DAY / 30.44;
+
+  function statusOf(exp, u, m) {
+    if (exp.heldSet[m].has(u)) {
+      return { held: true, months: monthsBetween(exp.months[exp.since[u][m]].s, exp.months[m].s) };
+    }
+    const d = exp.dropped[u][m];
+    if (d >= 0) return { held: false, dropped: true, months: monthsBetween(exp.months[d].s, exp.months[m].s) };
+    return { held: false, dropped: false };
+  }
+
+  function buildList(exp, m) {
+    const rows = [];
+    const prev = m > 0 ? exp.heldSet[m - 1] : new Set();
+    for (let u = 0; u < exp.union.length; u++) {
+      const r = exp.rank[u][m];
+      const listed = r >= 0 && r < TOP;
+      const held = exp.heldSet[m].has(u);
+      const justDropped = !held && prev.has(u);
+      if (listed || held || justDropped) rows.push(u);
+    }
+    rows.sort((a, b) => {
+      const ra = exp.rank[a][m], rb = exp.rank[b][m];
+      if ((ra < 0) !== (rb < 0)) return ra < 0 ? 1 : -1;
+      if (ra >= 0) return ra - rb;
+      return exp.score[b][m] - exp.score[a][m];
+    });
+    return rows;
+  }
+
+  // ── score maths (mirrors twstable.score) ──────────────────────────
+  function ols(C, a, len) {
+    if (a < 0 || a + len > C.length) return null;
+    let sy = 0, sxy = 0, syy = 0;
+    const xbar = (len - 1) / 2;
+    for (let i = 0; i < len; i++) {
+      const v = C[a + i];
+      if (!(v > 0)) return null;
+      const y = Math.log(v);
+      sy += y; sxy += (i - xbar) * y; syy += y * y;
+    }
+    const sxx = len * (len * len - 1) / 12;
+    const beta = sxy / sxx;
+    const syyc = syy - sy * sy / len;
+    const sse = Math.max(syyc - sxy * sxy / sxx, 0);
+    const sigma = Math.sqrt(sse / Math.max(len - 2, 1));
+    return { a, len, beta, sigma, intercept: sy / len - beta * xbar, r2: syyc > 0 ? 1 - sse / syyc : 0 };
+  }
+  const gauss = (x, w) => Math.exp(-0.5 * (x / Math.max(w, 1e-9)) ** 2);
+
+  function scoreParts(px, exp, m) {
+    const mo = exp.months[m];
+    const p = exp.segments[mo.g].params.score;
+    const w = p.window, s = mo.s;
+    const fit = ols(px.C, s - w + 1, w);
+    if (!fit) return null;
+    const slope = Math.exp(fit.beta * 252);
+    const trend = gauss(Math.log(Math.max(slope, 1e-12)) - Math.log(p.g_opt), Math.log(Math.max(p.g_width, 1.0001)));
+    const stability = 1 / (1 + (fit.sigma / Math.max(p.sigma0, 1e-6)) ** 2);
+    const nSub = Math.max(p.n_sub, 1);
+    const subLen = Math.max(Math.floor(w / nSub), 5);
+    const subs = [];
+    let consistency = 1;
+    if (nSub > 1) {
+      let acc = 0;
+      for (let k = 0; k < nSub; k++) {
+        const end = s - (nSub - 1 - k) * subLen;
+        const f = ols(px.C, end - subLen + 1, subLen);
+        subs.push(f);
+        if (f) acc += 1 / (1 + Math.exp(-(f.beta * 252) / Math.max(p.sub_scale, 1e-6)));
+      }
+      consistency = acc / nSub;
+    }
+    const fittedLast = fit.intercept + fit.beta * (w - 1);
+    const stretch = (Math.log(px.C[s]) - fittedLast) / Math.max(fit.sigma, 1e-9);
+    const restraint = gauss(Math.max(stretch - p.z0, 0), p.z_width);
+    return { fit, subs, slope, trend, stability, consistency, restraint, stretch,
+             score: trend * stability * consistency * restraint, p };
+  }
+
+  // ── ranking panel ─────────────────────────────────────────────────
+  function rowTint(st, alpha) {
+    const a = alpha ?? (parseFloat(css("--row-alpha")) || 0.55);
+    if (st.held) return rgba(ramp(TENURE, st.months), a);
+    if (st.dropped && st.months < FADE_MONTHS) {
+      return rgba(DROPPED, a * (1 - st.months / FADE_MONTHS) ** 1.3 + 0.04 * a);
+    }
+    return "transparent";
+  }
+
+  function statusText(st) {
+    if (st.held) return st.months < 0.5 ? "新進" : `持有 ${Math.round(st.months)} 月`;
+    if (st.dropped) return st.months < 0.5 ? "本次剔除" : `${Math.round(st.months)} 月前剔除`;
+    return "";
+  }
+
+  function rowHTML(exp, u, m, extraClass = "") {
+    const sid = exp.union[u];
+    const info = S.meta.stocks[sid] || [sid];
+    const r = exp.rank[u][m];
+    const sc = exp.score[u][m] / 1000;
+    const w = exp.weight[u][m];
+    const st = statusOf(exp, u, m);
+    const width = Math.round(46 * sc / exp.scoreMax);
+    const cls = ["row", st.held ? "held" : "", sid === S.sid ? "sel" : "", extraClass].join(" ");
+    return `<div class="${cls}" data-sid="${sid}" role="option" aria-selected="${sid === S.sid}"
+      style="--tint:${rowTint(st)};--swatch:${rowTint(st, 1)}" title="${esc(info[0])} ${sid}${info[2] ? "・" + esc(info[2]) : ""}">
+      <span class="rk num">${r >= 0 ? r + 1 : "–"}</span>
+      <span class="code num">${sid}</span>
+      <span class="name">${esc(info[0])}</span>
+      <span class="sc"><i style="width:${width}px"></i><b class="num">${sc.toFixed(3)}</b></span>
+      <span class="wt num">${w > 0 ? (w * 100).toFixed(1) + "%" : ""}</span>
+      <span class="st">${statusText(st)}</span>
+    </div>`;
+  }
+
+  function renderList() {
+    const exp = S.exp, m = S.m;
+    const rows = buildList(exp, m);
+    S.list = rows.map((u) => exp.union[u]);
+    const minScore = exp.segments[exp.months[m].g].params.min_score;
+    let html = "";
+    const u0 = exp.uIndex.get(S.sid);
+    if (u0 !== undefined && !rows.includes(u0)) {
+      html += `<div class="divider">目前檢視（本次不在榜上）</div>` + rowHTML(exp, u0, m, "pinned");
+    }
+    let crossed = false, ineligible = false;
+    for (const u of rows) {
+      const r = exp.rank[u][m];
+      if (!crossed && r >= 0 && exp.score[u][m] / 1000 < minScore) {
+        html += `<div class="divider">買進門檻 ${minScore.toFixed(3)}（以下只能續抱）</div>`;
+        crossed = true;
+      }
+      if (!ineligible && r < 0) {
+        html += `<div class="divider">不符流動性／股價門檻</div>`;
+        ineligible = true;
+      }
+      html += rowHTML(exp, u, m);
+    }
+    const el = $("rank-list");
+    el.innerHTML = html;
+    const sel = el.querySelector(".row.sel");
+    if (sel) sel.scrollIntoView({ block: "nearest" });
+  }
+
+  function renderMonth() {
+    const exp = S.exp, m = S.m, mo = exp.months[m];
+    const seg = exp.segments[mo.g];
+    $("month-title").innerHTML =
+      `<b class="num">${fmtDate(S.days[mo.t])}</b>` +
+      `<span class="num">${fmtDate(S.days[mo.s])} 收盤選股・第 ${m + 1}／${exp.months.length} 次` +
+      `${exp.segments.length > 1 ? `・折 ${seg.index}` : ""}</span>`;
+    const held = mo.h.length;
+    const invested = mo.h.reduce((a, [, w]) => a + w, 0) / 10000;
+    const prev = m > 0 ? exp.heldSet[m - 1] : new Set();
+    const now = exp.heldSet[m];
+    const ins = [...now].filter((u) => !prev.has(u)).length;
+    const outs = [...prev].filter((u) => !now.has(u)).length;
+    $("month-sub").innerHTML =
+      `<span>持股 <b class="num">${held}</b> 檔</span>` +
+      `<span>投入 <b class="num">${pctU(invested, 0)}</b></span>` +
+      `<span class="in">新進 ${ins}</span><span class="out">剔除 ${outs}</span>` +
+      `<span>過門檻 ${mo.nc}／合格 ${mo.ne}</span>`;
+    $("prev-month").disabled = m === 0;
+    $("next-month").disabled = m === exp.months.length - 1;
+  }
+
+  function renderLegend() {
+    const stops = [0, 3, 6, 12, 18, 24].map((x) => rgba(ramp(TENURE, x), 1));
+    const greens = [0, 3, 6, 9, 12].map((x) => rgba(DROPPED, 0.9 * (1 - x / FADE_MONTHS) ** 1.3 + 0.06));
+    $("legend").innerHTML =
+      `<span>新進</span><span class="ramp" style="background:linear-gradient(90deg,${stops.join(",")})"></span><span>持有 24 月+</span>` +
+      `<span>剛剔除</span><span class="ramp" style="background:linear-gradient(90deg,${greens.join(",")})"></span><span>12 月前</span>`;
+  }
+
+  // ── summary ───────────────────────────────────────────────────────
+  function renderSummary() {
+    const exp = S.exp;
+    const ms = exp.metrics.strategy, mb = exp.metrics.benchmark, rel = exp.metrics.relative || {};
+    $("exp-note").textContent = exp.note;
+    const avgHeld = exp.months.reduce((a, mo) => a + mo.h.length, 0) / exp.months.length;
+    const tiles = [
+      ["年化報酬", pct(ms.cagr), `大盤 ${pct(mb.cagr)}`],
+      ["Sharpe", fx(ms.sharpe), `大盤 ${fx(mb.sharpe)}`],
+      ["最大回檔", pct(ms.max_drawdown), `大盤 ${pct(mb.max_drawdown, 0)}`],
+      ["最差一年", pct(ms.worst_year), ""],
+      ["年化波動", pctU(ms.volatility), ""],
+      ["超額報酬", pct(rel.excess_cagr), `beta ${fx(rel.beta)}`],
+      ["換股", `${exp.months.length}`, `平均 ${avgHeld.toFixed(1)} 檔`],
+      ["期間", `${fmtDate(S.days[exp.curve.d[0]]).slice(0, 4)}–${fmtDate(S.days[exp.curve.d[exp.curve.d.length - 1]]).slice(0, 4)}`, ""],
+    ];
+    $("tiles").innerHTML = tiles.map(([k, v, s]) =>
+      `<div class="tile"><div class="k">${k}</div><div class="v num">${v}${s ? `<small>${s}</small>` : ""}</div></div>`).join("");
+  }
+
+  // ── canvas helpers ────────────────────────────────────────────────
+  function setupCanvas(cv) {
+    const r = cv.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, W: r.width, H: r.height };
+  }
+  const FONT = (size, weight = 400) =>
+    `${weight} ${size}px system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif`;
+
+  function niceTicks(lo, hi, n) {
+    const span = hi - lo;
+    if (!(span > 0)) return [lo];
+    const step0 = span / n;
+    const mag = 10 ** Math.floor(Math.log10(step0));
+    const step = [1, 2, 2.5, 5, 10].map((f) => f * mag).find((s) => s >= step0);
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+    return out;
+  }
+  function logTicks(lo, hi) {
+    const out = [];
+    const e0 = Math.floor(Math.log10(lo)), e1 = Math.ceil(Math.log10(hi));
+    const ratio = hi / lo;
+    const mult = ratio > 30 ? [1] : ratio > 6 ? [1, 2, 5] : ratio > 2.5 ? [1, 1.5, 2, 3, 5, 7] : [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
+    for (let e = e0; e <= e1; e++) for (const f of mult) {
+      const v = f * 10 ** e;
+      if (v >= lo && v <= hi) out.push(v);
+    }
+    if (out.length < 3 && ratio < 1.6) return niceTicks(lo, hi, 4);
+    return out;
+  }
+
+  // ── mini equity chart ─────────────────────────────────────────────
+  const MINI = { pad: { l: 4, r: 40, t: 8, b: 16 } };
+  function renderMini() {
+    const exp = S.exp, cv = $("mini");
+    const { ctx, W, H } = setupCanvas(cv);
+    ctx.clearRect(0, 0, W, H);
+    const c = exp.curve, n = c.d.length;
+    const P = MINI.pad, pw = W - P.l - P.r, ph = H - P.t - P.b;
+    const xs = (bar) => P.l + (bar - c.d[0]) / (c.d[n - 1] - c.d[0]) * pw;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) {
+      for (const v of [c.e[i], c.b[i]]) if (v > 0) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    }
+    const L0 = Math.log(lo) - 0.05, L1 = Math.log(hi) + 0.05;
+    const ys = (v) => P.t + (1 - (Math.log(v) - L0) / (L1 - L0)) * ph;
+    MINI.xs = xs; MINI.P = P; MINI.pw = pw;
+
+    ctx.font = FONT(10);
+    ctx.fillStyle = css("--muted");
+    ctx.strokeStyle = css("--grid");
+    ctx.lineWidth = 1;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    for (const v of logTicks(lo, hi)) {
+      const y = Math.round(ys(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + pw, y); ctx.stroke();
+      ctx.fillText(`${+v.toPrecision(2)}×`, P.l + pw + 4, y);
+    }
+    // fold seams
+    if (exp.segments.length > 1) {
+      ctx.strokeStyle = css("--axis");
+      ctx.setLineDash([2, 3]);
+      for (const seg of exp.segments.slice(1)) {
+        const mo = exp.months.find((x) => exp.segments[x.g] === seg);
+        if (!mo) continue;
+        const x = Math.round(xs(mo.s)) + 0.5;
+        ctx.beginPath(); ctx.moveTo(x, P.t); ctx.lineTo(x, P.t + ph); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+    const line = (arr, color, width, dash) => {
+      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash || []);
+      ctx.beginPath();
+      let on = false;
+      for (let i = 0; i < n; i++) {
+        if (!(arr[i] > 0)) { on = false; continue; }
+        const x = xs(c.d[i]), y = ys(arr[i]);
+        if (on) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        on = true;
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    line(c.b, css("--muted"), 1.2, [4, 3]);
+    line(c.e, css("--s1"), 1.8);
+    // labels at the right end
+    ctx.font = FONT(10, 600); ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    const ye = ys(c.e[n - 1]), yb = ys(c.b[n - 1]);
+    const above = ye <= yb;
+    ctx.fillStyle = css("--s1");
+    ctx.fillText("策略", P.l + pw - 2, Math.max(P.t + 11, Math.min(P.t + ph, above ? ye - 3 : ye + 13)));
+    ctx.fillStyle = css("--muted");
+    ctx.fillText("大盤", P.l + pw - 2, Math.max(P.t + 11, Math.min(P.t + ph, above ? yb + 13 : yb - 3)));
+    // years
+    ctx.font = FONT(10); ctx.textAlign = "center"; ctx.textBaseline = "top";
+    let lastYear = null;
+    for (let i = 0; i < n; i++) {
+      const y = new Date(S.days[c.d[i]]).getUTCFullYear();
+      if (y !== lastYear && y % 5 === 0) {
+        ctx.fillText(String(y), xs(c.d[i]), P.t + ph + 3);
+      }
+      lastYear = y;
+    }
+    // current rebalance
+    const mo = exp.months[S.m];
+    const x = Math.round(xs(mo.s)) + 0.5;
+    ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, P.t); ctx.lineTo(x, P.t + ph); ctx.stroke();
+  }
+
+  // ── main chart ────────────────────────────────────────────────────
+  const CH = {};
+
+  function viewRange() {
+    const exp = S.exp, mo = exp.months[S.m];
+    if (!S.zoom) return [exp.x0, exp.x1];
+    const w = exp.segments[mo.g].params.score.window;
+    const a = Math.max(0, mo.s - w + 1);
+    const b = S.m + 1 < exp.months.length ? exp.months[S.m + 1].t : exp.x1;
+    const pad = Math.max(2, Math.round((b - a) * 0.015));
+    return [a, Math.min(exp.x1, b + pad)];
+  }
+
+  function aggregate(px, a, b, pw) {
+    const bars = b - a + 1;
+    const per = bars / pw;              // bars per pixel
+    const k = per < 0.33 ? 1 : per < 1.6 ? 5 : per < 7 ? 21 : 63;
+    const out = [];
+    for (let g0 = Math.floor(a / k) * k; g0 <= b; g0 += k) {
+      let o = NaN, h = -Infinity, l = Infinity, c = NaN, i0 = -1, i1 = -1;
+      for (let i = Math.max(g0, a); i < Math.min(g0 + k, b + 1); i++) {
+        const ci = px.C[i];
+        if (!(ci > 0)) continue;
+        const hasBar = px.O[i] > 0;
+        if (k === 1 && !hasBar) continue;
+        if (isNaN(o)) { o = hasBar ? px.O[i] : ci; i0 = i; }
+        h = Math.max(h, hasBar ? px.H[i] : ci);
+        l = Math.min(l, hasBar ? px.L[i] : ci);
+        c = ci; i1 = i;
+      }
+      if (i0 >= 0) out.push({ i0, i1, x: (Math.max(g0, a) + Math.min(g0 + k - 1, b)) / 2, o, h, l, c, k });
+    }
+    return { k, groups: out };
+  }
+
+  function renderChart() {
+    const exp = S.exp, cv = $("chart");
+    const { ctx, W, H } = setupCanvas(cv);
+    ctx.clearRect(0, 0, W, H);
+    const sid = S.sid;
+    const px = sid ? pricesNow(sid) : null;
+    $("chart-status").textContent = !sid ? "" : px ? "" : "載入股價中…";
+    if (!px) { CH.ready = false; return; }
+
+    const [a, b] = viewRange();
+    const P = { l: 10, r: 58, t: 10, b: 24 };
+    const pw = W - P.l - P.r;
+    const scoreH = Math.max(70, Math.round((H - P.t - P.b) * 0.24));
+    const stripH = 9, gap = 14;
+    const priceH = H - P.t - P.b - scoreH - stripH - gap * 2;
+    const yStrip = P.t + priceH + gap / 2 + 2;
+    const yScore0 = yStrip + stripH + gap;
+    const xs = (bar) => P.l + (bar - a + 0.5) / (b - a + 1) * pw;
+    Object.assign(CH, { a, b, P, pw, xs, priceH, yScore0, scoreH, W, H, ready: true, px });
+
+    const { k, groups } = aggregate(px, a, b, pw);
+    CH.groups = groups; CH.k = k;
+    let lo = Infinity, hi = -Infinity;
+    for (const g of groups) { lo = Math.min(lo, g.l); hi = Math.max(hi, g.h); }
+    if (!isFinite(lo)) { lo = 1; hi = 2; }
+    let ys;
+    if (S.log) {
+      const L0 = Math.log(lo), L1 = Math.log(hi), padL = (L1 - L0) * 0.06 || 0.05;
+      const A = L0 - padL, B = L1 + padL;
+      ys = (v) => P.t + (1 - (Math.log(v) - A) / (B - A)) * priceH;
+      CH.yinv = (y) => Math.exp(A + (1 - (y - P.t) / priceH) * (B - A));
+    } else {
+      const padV = (hi - lo) * 0.06 || hi * 0.05;
+      const A = Math.max(0, lo - padV), B = hi + padV;
+      ys = (v) => P.t + (1 - (v - A) / (B - A)) * priceH;
+      CH.yinv = (y) => A + (1 - (y - P.t) / priceH) * (B - A);
+    }
+    CH.ys = ys;
+
+    const mo = exp.months[S.m];
+    const parts = scoreParts(px, exp, S.m);
+    CH.parts = parts;
+    const w = exp.segments[mo.g].params.score.window;
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(P.l, P.t, pw, priceH); ctx.clip();
+
+    // look-back window
+    ctx.fillStyle = css("--shade");
+    const xa = xs(mo.s - w + 1) - pw / (b - a + 1) / 2, xb = xs(mo.s) + pw / (b - a + 1) / 2;
+    ctx.fillRect(xa, P.t, xb - xa, priceH);
+
+    // grid + price labels
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    const ticks = S.log ? logTicks(CH.yinv(P.t + priceH), CH.yinv(P.t)) : niceTicks(CH.yinv(P.t + priceH), CH.yinv(P.t), 6);
+    for (const v of ticks) {
+      const y = Math.round(ys(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + pw, y); ctx.stroke();
+    }
+
+    // candles
+    const up = css("--up"), down = css("--down");
+    const cw = pw / (b - a + 1) * k;
+    const body = Math.max(1, Math.min(cw * 0.7, 14));
+    for (const g of groups) {
+      const x = xs(g.x);
+      const col = g.c >= g.o ? up : down;
+      ctx.strokeStyle = col; ctx.fillStyle = col;
+      ctx.lineWidth = 1;
+      const yh = ys(g.h), yl = ys(g.l);
+      ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, yh); ctx.lineTo(Math.round(x) + 0.5, yl); ctx.stroke();
+      if (body >= 2) {
+        const y1 = ys(Math.max(g.o, g.c)), y2 = ys(Math.min(g.o, g.c));
+        ctx.fillRect(Math.round(x - body / 2), y1, Math.round(body), Math.max(1, y2 - y1));
+      }
+    }
+
+    // fit line across the whole view, with +-1 sigma
+    if (parts) {
+      const f = parts.fit;
+      const at = (bar) => f.intercept + f.beta * (bar - f.a);
+      const drawLine = (off, color, width, dash) => {
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash || []);
+        ctx.beginPath();
+        const steps = 120;
+        for (let i = 0; i <= steps; i++) {
+          const bar = a + (b - a) * i / steps;
+          const v = Math.exp(at(bar) + off);
+          const x = xs(bar), y = ys(v);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+      };
+      drawLine(f.sigma, css("--s1"), 1, [4, 4]);
+      drawLine(-f.sigma, css("--s1"), 1, [4, 4]);
+      drawLine(0, css("--s1"), 2);
+      if (S.zoom) {
+        ctx.strokeStyle = css("--s2"); ctx.lineWidth = 2.5;
+        for (const sub of parts.subs) {
+          if (!sub) continue;
+          ctx.beginPath();
+          ctx.moveTo(xs(sub.a), ys(Math.exp(sub.intercept)));
+          ctx.lineTo(xs(sub.a + sub.len - 1), ys(Math.exp(sub.intercept + sub.beta * (sub.len - 1))));
+          ctx.stroke();
+        }
+      }
+    }
+
+    // decision and trade bars of this rebalance, and the next trade when zoomed
+    const vline = (bar, color, dash, label) => {
+      if (bar < a || bar > b) return;
+      const x = Math.round(xs(bar)) + 0.5;
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash(dash);
+      ctx.beginPath(); ctx.moveTo(x, P.t); ctx.lineTo(x, P.t + priceH); ctx.stroke();
+      ctx.setLineDash([]);
+      if (label) {
+        ctx.font = FONT(10.5); ctx.fillStyle = color; ctx.textBaseline = "top";
+        const right = x + 60 > P.l + pw;
+        ctx.textAlign = right ? "right" : "left";
+        ctx.fillText(label, right ? x - 4 : x + 4, P.t + 2);
+      }
+    };
+    vline(mo.s, css("--ink"), [], S.zoom ? "選股" : "");
+    if (S.zoom && S.m + 1 < exp.months.length) vline(exp.months[S.m + 1].t, css("--ink-2"), [3, 3], "下次換股");
+    ctx.restore();
+
+    // price axis labels
+    ctx.font = FONT(10.5); ctx.fillStyle = css("--muted"); ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    for (const v of ticks) {
+      const y = ys(v);
+      if (y > P.t + 4 && y < P.t + priceH - 4) ctx.fillText(fmtPrice(v), P.l + pw + 6, y);
+    }
+    ctx.textBaseline = "top";
+    ctx.fillText(S.log ? "還原價 log" : "還原價", P.l + pw + 6, P.t - 2);
+
+    // holding strip: when this experiment held the stock, coloured by tenure
+    const u = exp.uIndex.get(sid);
+    ctx.fillStyle = css("--grid");
+    ctx.fillRect(P.l, yStrip, pw, stripH);
+    if (u !== undefined) {
+      for (let m = 0; m < exp.months.length; m++) {
+        if (!exp.heldSet[m].has(u)) continue;
+        const t0 = exp.months[m].t;
+        const t1 = m + 1 < exp.months.length ? exp.months[m + 1].t : exp.x1 + 1;
+        if (t1 < a || t0 > b) continue;
+        const st = statusOf(exp, u, m);
+        ctx.fillStyle = rgba(ramp(TENURE, st.months), 1);
+        const x0 = Math.max(P.l, xs(t0) - pw / (b - a + 1) / 2);
+        const x1 = Math.min(P.l + pw, xs(t1) - pw / (b - a + 1) / 2);
+        ctx.fillRect(x0, yStrip, Math.max(1, x1 - x0), stripH);
+      }
+    }
+    ctx.font = FONT(10); ctx.fillStyle = css("--muted"); ctx.textBaseline = "middle";
+    ctx.fillText("持有", P.l + pw + 6, yStrip + stripH / 2);
+
+    // score pane
+    const smax = exp.scoreMax;
+    const yS = (v) => yScore0 + (1 - v / smax) * scoreH;
+    CH.yS = yS;
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    ctx.fillStyle = css("--muted"); ctx.font = FONT(10);
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    for (const v of niceTicks(0, smax, 3)) {
+      const y = Math.round(yS(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + pw, y); ctx.stroke();
+      ctx.fillText(v.toFixed(2), P.l + pw + 6, y);
+    }
+    ctx.textBaseline = "top";
+    ctx.fillText("分數", P.l + 4, yScore0 + 1);
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(P.l, yScore0 - 6, pw, scoreH + 12); ctx.clip();
+    // buy threshold per segment, and fold seams
+    ctx.strokeStyle = css("--ink-2"); ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+    let gPrev = -1, gStart = 0;
+    const flushSeg = (g, m0, m1) => {
+      const thr = exp.segments[g].params.min_score;
+      const x0 = xs(exp.months[m0].s), x1 = m1 + 1 < exp.months.length ? xs(exp.months[m1 + 1].s) : xs(b);
+      ctx.beginPath(); ctx.moveTo(x0, yS(thr)); ctx.lineTo(x1, yS(thr)); ctx.stroke();
+    };
+    for (let m = 0; m < exp.months.length; m++) {
+      const g = exp.months[m].g;
+      if (g !== gPrev) {
+        if (gPrev >= 0) flushSeg(gPrev, gStart, m - 1);
+        gPrev = g; gStart = m;
+      }
+    }
+    flushSeg(gPrev, gStart, exp.months.length - 1);
+    ctx.setLineDash([]);
+    if (exp.segments.length > 1) {
+      ctx.strokeStyle = css("--axis"); ctx.setLineDash([1, 3]);
+      ctx.font = FONT(9.5); ctx.fillStyle = css("--muted"); ctx.textAlign = "left"; ctx.textBaseline = "top";
+      for (let m = 1; m < exp.months.length; m++) {
+        if (exp.months[m].g === exp.months[m - 1].g) continue;
+        const x = Math.round(xs(exp.months[m].s)) + 0.5;
+        ctx.beginPath(); ctx.moveTo(x, yScore0); ctx.lineTo(x, yScore0 + scoreH); ctx.stroke();
+        ctx.fillText(`折${exp.segments[exp.months[m].g].index}`, x + 3, yScore0);
+      }
+      ctx.setLineDash([]);
+    }
+    if (u !== undefined) {
+      const sc = exp.score[u], rk = exp.rank[u];
+      ctx.strokeStyle = css("--violet"); ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      let started = false;
+      for (let m = 0; m < exp.months.length; m++) {
+        const x = xs(exp.months[m].s), y = yS(sc[m] / 1000);
+        if (started) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        started = true;
+      }
+      ctx.stroke();
+      const showDots = pw / exp.months.length > 3.5 || S.zoom;
+      for (let m = 0; m < exp.months.length; m++) {
+        const bar = exp.months[m].s;
+        if (bar < a - 2 || bar > b + 2) continue;
+        const x = xs(bar), y = yS(sc[m] / 1000);
+        const cur = m === S.m;
+        if (!showDots && !cur) continue;
+        const r = cur ? 5 : 2.6;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+        if (rk[m] < 0) {
+          ctx.fillStyle = css("--surface"); ctx.fill();
+          ctx.strokeStyle = css("--violet"); ctx.lineWidth = 1.3; ctx.stroke();
+        } else {
+          ctx.fillStyle = css("--violet"); ctx.fill();
+          if (cur) { ctx.strokeStyle = css("--surface"); ctx.lineWidth = 2; ctx.stroke(); }
+        }
+      }
+    }
+    ctx.restore();
+
+    // x axis: years, or months when zoomed in close
+    const spanDays = (S.days[b] - S.days[a]) / DAY;
+    ctx.font = FONT(10.5); ctx.fillStyle = css("--muted"); ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.strokeStyle = css("--axis");
+    const yAxis = yScore0 + scoreH + 4;
+    let prevKey = null, lastX = -1e9;
+    const yearStep = spanDays > 365 * 14 ? 2 : 1;
+    for (let i = a; i <= b; i++) {
+      const d = new Date(S.days[i]);
+      const yy = d.getUTCFullYear(), mm = d.getUTCMonth();
+      const key = spanDays > 900 ? yy : yy * 12 + mm;
+      if (prevKey !== null && key !== prevKey) {
+        const x = xs(i);
+        let label = null;
+        if (spanDays > 900) {
+          if (yy % yearStep === 0) label = String(yy);
+        } else if (spanDays > 400) {
+          if (mm % 3 === 0) label = mm === 0 ? String(yy) : `${mm + 1}月`;
+        } else {
+          label = mm === 0 ? String(yy) : `${mm + 1}月`;
+        }
+        if (label && x - lastX > 34) {
+          ctx.fillText(label, x, yAxis);
+          ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, yAxis - 4); ctx.lineTo(Math.round(x) + 0.5, yAxis - 1); ctx.stroke();
+          lastX = x;
+        }
+      }
+      prevKey = key;
+    }
+
+    const kName = { 1: "日 K", 5: "週 K（每根 5 日）", 21: "月 K（每根 21 日）", 63: "季 K（每根 63 日）" }[k];
+    $("view-note").textContent = `${kName}・${S.zoom ? "放大：回推起點 → 下次換股" : "全範圍"}`;
+  }
+
+  // ── stock header & score breakdown ───────────────────────────────
+  function renderStockHead() {
+    const exp = S.exp, sid = S.sid, m = S.m;
+    const info = S.meta.stocks[sid] || [sid, "", ""];
+    const u = exp.uIndex.get(sid);
+    let facts = "";
+    if (u !== undefined) {
+      const r = exp.rank[u][m], sc = exp.score[u][m] / 1000, w = exp.weight[u][m];
+      const st = statusOf(exp, u, m);
+      const nHeld = exp.heldSet.filter((s) => s.has(u)).length;
+      facts =
+        `<span>本次排名 <b class="num">${r >= 0 ? `#${r + 1}` : "不合格"}</b></span>` +
+        `<span>分數 <b class="num">${sc.toFixed(3)}</b></span>` +
+        `<span>權重 <b class="num">${w > 0 ? pctU(w, 1) : "–"}</b></span>` +
+        `<span>${statusText(st) || "未持有"}</span>` +
+        `<span>本實驗共持有 <b class="num">${nHeld}</b> 次</span>`;
+    }
+    $("stock-head").innerHTML =
+      `<span class="title">${esc(info[0])}<small class="num">${sid}・${esc(info[1])}${info[2] ? "・" + esc(info[2]) : ""}</small></span>` +
+      `<span class="facts">${facts}</span>` +
+      `<span class="chips"><span class="view-note" id="view-note"></span><button class="chip" id="zoom-chip" aria-pressed="${S.zoom}" title="Enter">放大</button>` +
+      `<button class="chip" id="log-chip" aria-pressed="${S.log}" title="L">log</button></span>`;
+    $("zoom-chip").onclick = () => { S.zoom = !S.zoom; update({ chart: true, head: true }); };
+    $("log-chip").onclick = () => { S.log = !S.log; update({ chart: true, head: true }); };
+  }
+
+  function renderScoreInfo() {
+    const exp = S.exp, m = S.m, sid = S.sid;
+    const u = exp.uIndex.get(sid);
+    const px = pricesNow(sid);
+    const parts = px ? scoreParts(px, exp, m) : null;
+    const keys = `<span class="keys"><kbd>←</kbd><kbd>→</kbd> 換股日　<kbd>↑</kbd><kbd>↓</kbd> 個股　<kbd>Enter</kbd> 放大　<kbd>?</kbd> 說明</span>`;
+    if (!parts) {
+      $("score-info").innerHTML = (px ? `<span>回推期間內股價不完整，這次沒有分數。</span>` : "") + keys;
+      return;
+    }
+    const p = parts.p;
+    const off = u !== undefined ? exp.score[u][m] / 1000 : parts.score;
+    $("score-info").innerHTML =
+      `<span class="eq">分數 <b class="num">${off.toFixed(3)}</b> ≈ 趨勢 <b class="num">${fx(parts.trend)}</b>` +
+      ` × 穩定 <b class="num">${fx(parts.stability)}</b> × 一致 <b class="num">${fx(parts.consistency)}</b>` +
+      ` × 克制 <b class="num">${fx(parts.restraint)}</b></span>` + keys +
+      `<span class="why">回推 ${p.window} 個交易日：年化成長 <b>${pct(parts.slope - 1)}</b>（最理想 ${pct(p.g_opt - 1, 0)}）・` +
+      `偏離趨勢線 ±<b>${pctU(Math.exp(parts.fit.sigma) - 1)}</b>（尺度 ${pctU(p.sigma0, 0)}）・` +
+      `${p.n_sub} 段各自上漲：${parts.subs.map((s) => s ? pct(Math.exp(s.beta * 252) - 1, 0) : "–").join(" / ")}・` +
+      `目前高於趨勢線 <b>${fx(parts.stretch, 1)}σ</b>（容忍 ${fx(p.z0, 1)}σ）・買進門檻 ${fx(exp.segments[exp.months[m].g].params.min_score, 3)}</span>`;
+  }
+
+  // ── hover ─────────────────────────────────────────────────────────
+  function onHover(ev) {
+    const tip = $("tip");
+    if (!CH.ready) { tip.classList.remove("on"); return; }
+    const r = $("chart").getBoundingClientRect();
+    const x = ev.clientX - r.left, y = ev.clientY - r.top;
+    const { a, b, P, pw } = CH;
+    if (x < P.l || x > P.l + pw) { tip.classList.remove("on"); renderChartWithCross(null); return; }
+    const bar = Math.round(a + (x - P.l) / pw * (b - a + 1) - 0.5);
+    let html = "";
+    const exp = S.exp;
+    if (y >= CH.yScore0 - 8) {
+      // nearest rebalance
+      let best = 0, bd = Infinity;
+      for (let m = 0; m < exp.months.length; m++) {
+        const d = Math.abs(exp.months[m].s - bar);
+        if (d < bd) { bd = d; best = m; }
+      }
+      const u = exp.uIndex.get(S.sid);
+      if (u === undefined) { tip.classList.remove("on"); return; }
+      const r0 = exp.rank[u][best], w = exp.weight[u][best];
+      html = `<div class="t">${fmtDate(S.days[exp.months[best].s])} 選股</div>` +
+        `分數 <b class="num">${(exp.score[u][best] / 1000).toFixed(3)}</b>・排名 ${r0 >= 0 ? "#" + (r0 + 1) : "不合格"}` +
+        (w > 0 ? `・權重 ${pctU(w)}` : "");
+      renderChartWithCross(exp.months[best].s);
+    } else {
+      const g = CH.groups.find((g) => bar >= g.i0 - (CH.k - 1) && bar <= g.i1 + (CH.k - 1) && Math.abs(g.x - bar) <= CH.k);
+      if (!g) { tip.classList.remove("on"); renderChartWithCross(bar); return; }
+      const label = CH.k === 1 ? fmtDate(S.days[g.i0]) : `${fmtDate(S.days[g.i0])} – ${fmtDate(S.days[g.i1])}`;
+      const chg = g.c / g.o - 1;
+      html = `<div class="t">${label}</div>` +
+        `開 ${fmtPrice(g.o)}　高 ${fmtPrice(g.h)}　低 ${fmtPrice(g.l)}　收 <b>${fmtPrice(g.c)}</b>` +
+        `<div class="t">${CH.k === 1 ? "當日" : "期間"} ${pct(chg, 2)}・還原價</div>`;
+      renderChartWithCross(g.x);
+    }
+    tip.innerHTML = html;
+    tip.classList.add("on");
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let tx = x + 14, ty = y + 14;
+    if (tx + tw > r.width - 4) tx = x - tw - 14;
+    if (ty + th > r.height - 4) ty = y - th - 14;
+    tip.style.left = `${tx}px`; tip.style.top = `${ty}px`;
+  }
+
+  function renderChartWithCross(bar) {
+    renderChart();
+    if (bar === null || !CH.ready) return;
+    const ctx = $("chart").getContext("2d");
+    const x = Math.round(CH.xs(bar)) + 0.5;
+    ctx.strokeStyle = css("--axis"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, CH.P.t); ctx.lineTo(x, CH.yScore0 + CH.scoreH); ctx.stroke();
+  }
+
+  // ── navigation ────────────────────────────────────────────────────
+  function update(what = {}) {
+    const all = !Object.keys(what).length;
+    if (all || what.list) renderList();
+    if (all || what.month) renderMonth();
+    if (all || what.summary) renderSummary();
+    if (all || what.mini || what.month) renderMini();
+    if (all || what.head || what.list) renderStockHead();
+    if (all || what.chart || what.list) { renderChart(); renderScoreInfo(); }
+    writeHash();
+    ensurePrices();
+  }
+
+  function ensurePrices() {
+    const sid = S.sid;
+    if (!sid || pricesNow(sid)) return;
+    loadPrices(sid).then(() => {
+      if (S.sid === sid) { renderChart(); renderScoreInfo(); }
+    }).catch((e) => { $("chart-status").textContent = `股價載入失敗：${e.message}`; });
+    // warm the neighbours so ↑/↓ feels instant
+    const i = S.list.indexOf(sid);
+    for (const j of [i - 1, i + 1, i + 2]) {
+      if (j >= 0 && j < S.list.length) loadPrices(S.list[j]).catch(() => {});
+    }
+  }
+
+  function setMonth(m) {
+    m = Math.max(0, Math.min(S.exp.months.length - 1, m));
+    if (m === S.m) return;
+    S.m = m;
+    update({ list: true, month: true, chart: true });
+  }
+
+  function moveStock(delta) {
+    const list = S.list;
+    if (!list.length) return;
+    let i = list.indexOf(S.sid);
+    if (i < 0) i = delta > 0 ? -1 : list.length;
+    i = Math.max(0, Math.min(list.length - 1, i + delta));
+    S.sid = list[i];
+    update({ list: true, chart: true });
+    prefetchAround(i);
+  }
+  function prefetchAround(i) {
+    for (const j of [i + 1, i + 2, i - 1]) if (j >= 0 && j < S.list.length) loadPrices(S.list[j]).catch(() => {});
+  }
+
+  async function setExperiment(id, keepDate = true) {
+    const prevDay = S.exp ? S.days[S.exp.months[S.m].s] : null;
+    if (!S.exps[id]) {
+      $("chart-status").textContent = "載入實驗資料中…";
+      S.exps[id] = prepare(await getJSON(`exp/${id}.json`));
+    }
+    S.exp = S.exps[id];
+    // keep the date: nearest rebalance in the new experiment
+    if (keepDate && prevDay !== null) {
+      let best = 0, bd = Infinity;
+      S.exp.months.forEach((mo, m) => {
+        const d = Math.abs(S.days[mo.s] - prevDay);
+        if (d < bd) { bd = d; best = m; }
+      });
+      S.m = best;
+    }
+    S.m = Math.min(S.m, S.exp.months.length - 1);
+    for (const b of $("exp-tabs").children) b.setAttribute("aria-selected", String(b.dataset.id === id));
+    const rows = buildList(S.exp, S.m);
+    if (!S.sid || !S.exp.uIndex.has(S.sid)) S.sid = S.exp.union[rows[0]];
+    update();
+  }
+
+  function onKey(ev) {
+    if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    const help = $("help");
+    if (!help.hidden) {
+      if (ev.key === "Escape" || ev.key === "?") { help.hidden = true; ev.preventDefault(); }
+      return;
+    }
+    const k = ev.key;
+    const exps = S.meta.experiments;
+    switch (k) {
+      case "ArrowLeft": setMonth(S.m - 1); break;
+      case "ArrowRight": setMonth(S.m + 1); break;
+      case "ArrowUp": moveStock(-1); break;
+      case "ArrowDown": moveStock(1); break;
+      case "PageUp": moveStock(-10); break;
+      case "PageDown": moveStock(10); break;
+      case "Home": setMonth(0); break;
+      case "End": setMonth(S.exp.months.length - 1); break;
+      case "Enter": S.zoom = !S.zoom; update({ chart: true, head: true }); break;
+      case "l": case "L": S.log = !S.log; update({ chart: true, head: true }); break;
+      case "?": help.hidden = false; break;
+      default:
+        if (/^[1-9]$/.test(k) && +k <= exps.length) { setExperiment(exps[+k - 1].id); break; }
+        return;
+    }
+    ev.preventDefault();
+  }
+
+  // ── URL hash: experiment, date, stock, zoom ──────────────────────
+  function writeHash() {
+    if (!S.exp) return;
+    const h = `#e=${S.exp.id}&d=${fmtDate(S.days[S.exp.months[S.m].s])}&s=${S.sid || ""}${S.zoom ? "&z=1" : ""}`;
+    if (location.hash !== h) history.replaceState(null, "", h);
+  }
+  function readHash() {
+    const out = {};
+    for (const part of location.hash.replace(/^#/, "").split("&")) {
+      const [k, v] = part.split("=");
+      if (k) out[k] = decodeURIComponent(v || "");
+    }
+    return out;
+  }
+
+  // ── boot ──────────────────────────────────────────────────────────
+  async function boot() {
+    S.meta = await getJSON("meta.json");
+    const cal = S.meta.calendar;
+    const t0 = Date.parse(cal.start + "T00:00:00Z");
+    S.days = new Float64Array(cal.steps.length + 1);
+    S.days[0] = t0;
+    for (let i = 0; i < cal.steps.length; i++) S.days[i + 1] = S.days[i] + cal.steps[i] * DAY;
+
+    $("exp-tabs").innerHTML = S.meta.experiments.map((e, i) =>
+      `<button role="tab" data-id="${e.id}" title="${esc(e.note)}"><kbd>${i + 1}</kbd>${esc(e.label)}</button>`).join("");
+    $("exp-tabs").addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-id]");
+      if (b) setExperiment(b.dataset.id);
+    });
+    renderLegend();
+
+    const h = readHash();
+    const id = S.meta.experiments.some((e) => e.id === h.e) ? h.e : S.meta.experiments[0].id;
+    S.sid = h.s || null;
+    S.zoom = h.z === "1";
+    S.exps[id] = prepare(await getJSON(`exp/${id}.json`));
+    S.exp = S.exps[id];
+    S.m = S.exp.months.length - 1;
+    if (h.d) {
+      const want = Date.parse(h.d + "T00:00:00Z");
+      let best = S.m, bd = Infinity;
+      S.exp.months.forEach((mo, m) => {
+        const d = Math.abs(S.days[mo.s] - want);
+        if (d < bd) { bd = d; best = m; }
+      });
+      S.m = best;
+    }
+    await setExperiment(id, false);
+
+    $("rank-list").addEventListener("click", (ev) => {
+      const row = ev.target.closest(".row");
+      if (!row) return;
+      S.sid = row.dataset.sid;
+      update({ list: true, chart: true });
+    });
+    $("prev-month").onclick = () => setMonth(S.m - 1);
+    $("next-month").onclick = () => setMonth(S.m + 1);
+    $("help-btn").onclick = () => { $("help").hidden = false; };
+    $("help").addEventListener("click", (ev) => { if (ev.target.id === "help") $("help").hidden = true; });
+    document.addEventListener("keydown", onKey);
+    document.querySelectorAll(".pad button").forEach((b) => {
+      b.addEventListener("click", () => onKey({ key: b.dataset.key, preventDefault() {} }));
+    });
+    $("mini").addEventListener("click", (ev) => {
+      if (!MINI.xs) return;
+      const r = $("mini").getBoundingClientRect();
+      const x = ev.clientX - r.left;
+      let best = 0, bd = Infinity;
+      S.exp.months.forEach((mo, m) => {
+        const d = Math.abs(MINI.xs(mo.s) - x);
+        if (d < bd) { bd = d; best = m; }
+      });
+      setMonth(best);
+    });
+    const chart = $("chart");
+    chart.addEventListener("mousemove", onHover);
+    chart.addEventListener("mouseleave", () => { $("tip").classList.remove("on"); renderChart(); });
+    chart.addEventListener("click", (ev) => {
+      // a click in the score pane jumps to that rebalance
+      if (!CH.ready) return;
+      const r = chart.getBoundingClientRect();
+      if (ev.clientY - r.top < CH.yScore0 - 8) return;
+      const bar = CH.a + (ev.clientX - r.left - CH.P.l) / CH.pw * (CH.b - CH.a + 1);
+      let best = 0, bd = Infinity;
+      S.exp.months.forEach((mo, m) => {
+        const d = Math.abs(mo.s - bar);
+        if (d < bd) { bd = d; best = m; }
+      });
+      setMonth(best);
+    });
+    let raf = 0;
+    new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => { renderMini(); renderChart(); });
+    }).observe(document.body);
+    window.addEventListener("themechange", () => update());
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => update());
+  }
+
+  boot().catch((e) => {
+    console.error(e);
+    $("chart-status").textContent = `載入失敗：${e.message}`;
+  });
+})();
+</script>
+</body>
+</html>

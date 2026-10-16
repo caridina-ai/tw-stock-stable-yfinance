@@ -166,6 +166,24 @@ def cmd_sweep_report(args: argparse.Namespace) -> int:
     return run_report_cli(args)
 
 
+def cmd_explore(args: argparse.Namespace) -> int:
+    from .explore import run_explore_cli
+
+    return run_explore_cli(args)
+
+
+def cmd_stacked(args: argparse.Namespace) -> int:
+    from .stacked import run_stacked_cli
+
+    return run_stacked_cli(args)
+
+
+def cmd_viewer(args: argparse.Namespace) -> int:
+    from .viewer_build import run_viewer_cli
+
+    return run_viewer_cli(args)
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -249,6 +267,22 @@ def build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--wfcv", help="WFCV result holding the production parameters")
     sr.add_argument("--out-dir", help="sweep directory (default results/hyper)")
     sr.set_defaults(func=cmd_sweep_report)
+
+    e = sub.add_parser("explore", help="replay experiments rebalance by rebalance (viewer input)")
+    e.add_argument("--only", nargs="+", metavar="ID", help="experiment ids (default: all)")
+    e.add_argument("--out-dir", help="output directory (default results/explore)")
+    e.set_defaults(func=cmd_explore)
+
+    st = sub.add_parser("stacked", help="stacked equity curve PNG of each explored experiment")
+    st.add_argument("--only", nargs="+", metavar="ID", help="experiment ids (default: all)")
+    st.add_argument("--out-dir", help="explore directory (default results/explore)")
+    st.set_defaults(func=cmd_stacked)
+
+    vw = sub.add_parser("viewer", help="export the explored experiments as the web viewer (docs/viewer)")
+    vw.add_argument("--out", help="output directory (default docs/viewer)")
+    vw.add_argument("--explore-dir", help="explore directory (default results/explore)")
+    vw.add_argument("--no-prices", action="store_true", help="skip the per-stock price files")
+    vw.set_defaults(func=cmd_viewer)
 
     return p
 

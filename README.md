@@ -88,6 +88,11 @@ python -m twstable report
 # 8. 換股日 × 假日規則 × 持股檔數（9,122 組，4 核心約 15 分鐘）→ results/hyper/
 python -m twstable sweep
 python -m twstable sweep-report   # 只從 grid.csv 重做圖與 SUMMARY.md（幾秒，不跑回測）
+
+# 9. 持股變化：逐次換股重播 7 個實驗（約 20 秒）→ results/explore/
+python -m twstable explore
+python -m twstable stacked        # 疊加型 equity curve → results/explore/<實驗>/stacked.png（約 50 秒）
+python -m twstable viewer         # 網頁 viewer 與資料 → docs/viewer/（約 1 分鐘）
 ```
 
 `results/` 產出的檔案：
@@ -101,6 +106,7 @@ python -m twstable sweep-report   # 只從 grid.csv 重做圖與 SUMMARY.md（�
 | `wfcv_monthly.json` | **上線版** WFCV：固定每月 24 日、12 檔、權重上限後重新搜尋（第五節） |
 | `production_params.json` | 上線版超參數（＝ `wfcv_monthly.json` 的 `production_params`） |
 | `hyper/` | 換股日 × 持股檔數實驗：`grid.csv`（每組指標）、`curves.parquet`（每組月底權益）、`SUMMARY.md`（結論與圖）、`recommended_params.json` |
+| `explore/<實驗>/` | 逐次換股重播（第六節）：`trace.json`（每次換股的持股與權重、各折參數、指標）、`scores.parquet`（曾上榜股票每次的分數與排名）、`curve.parquet`、`positions.parquet`（每檔每日市值），以及 `stacked.png` |
 
 ## 可分享的網頁報告
 
@@ -115,7 +121,8 @@ python -m http.server -d docs
 ```
 
 推上 GitHub 後，到 **Settings → Pages → Source 選 `main` 分支的 `/docs` 資料夾**，
-就會有一個公開網址可以分享。
+就會有一個公開網址可以分享（目前已開：<https://caridina-ai.github.io/tw-stock-stable-yfinance/>）。
+報告頂端連到 `docs/viewer/` 的持股變化 viewer（第六節），它由 `python -m twstable viewer` 產生。
 
 > 頁面的數字是**產生當下寫死**的。重跑回測之後記得重新執行 `python -m twstable report`，
 > 否則網頁會停留在舊結果。
@@ -377,6 +384,70 @@ fold test period              yrs  OOS CAGR  Sharpe      MDD  Calmar  IS Sharpe 
 
 ---
 
+## 六、持股變化：Viewer 與疊加型 Equity Curve
+
+需求見 [`genesis/FIAT-http-viewer.md`](genesis/FIAT-http-viewer.md)。
+
+**線上看：<https://caridina-ai.github.io/tw-stock-stable-yfinance/viewer/>**
+（本機：`python -m http.server -d docs` 後開 <http://localhost:8000/viewer/>）
+
+### 七個實驗
+
+`twstable explore` 用回測引擎本身把每個實驗**逐次換股重播**一遍，保留結果檔原本丟掉的東西：
+每次換股時**所有**合格股票的分數與排名、換股後的持股與權重、每檔持股每天的市值。
+walk-forward 實驗逐折用各折自己的參數、照 `chain_equity` 串接；重播出來的權益曲線與原結果檔逐點相同
+（上線版誤差 1e-15，每次換股的持股完全一致）。
+
+| 鍵 | 實驗 | 說明 | CAGR | Sharpe | 最大回檔 |
+|---|---|---|---|---|---|
+| 1 | 上線版 | `wfcv_monthly.json`：每月 24 日、12 檔、權重上限 | +14.21% | 1.14 | -27.4% |
+| 2 | 上線版・無權重上限 | 同上各折參數，只關掉 `cap_weight` | +14.35% | 1.09 | -39.2% |
+| 3 | 上線版・分數權重 | 同上各折參數，`weighting = score` | +13.67% | 1.11 | -26.9% |
+| 4 | 原 WFCV 參數・每月 24 日 | `wfcv.json` 各折參數＋每月 24 日、12 檔、權重上限（第四節的建議設定） | +14.61% | 1.19 | -23.0% |
+| 5 | 原 WFCV（每 10–60 交易日） | `wfcv.json` 原樣（第三節） | +15.03% | 1.12 | -28.2% |
+| 6 | 預設參數・每 20 交易日 | `backtest.json`：未優化的預設參數、20 檔，2001 起 | +12.09% | 0.77 | -52.9% |
+| 7 | 上線版參數・全期 | `production_params.json` 從 2001 起（2020 以後是它的訓練期） | +12.29% | 0.97 | -40.2% |
+
+1、2 兩列就是「權重上限有用」的直接證據：同一組參數，關掉上限後報酬幾乎一樣，最大回檔從 -27% 變成 -39%
+（2008 年候選不足時資金集中到少數幾檔）。
+
+### 網頁 viewer（`docs/viewer/`）
+
+- **左邊排行榜**：每次換股時通過流動性與股價門檻、依分數排序的前 50 名，加上排名外但仍續抱（遲滯規則）
+  或剛被剔除的股票，列出分數與權重。成分股依「已連續持有多久」由黃轉紅；被剔除的依「剔除多久了」
+  由深綠漸淡（12 個月後不再上色）。列表中有一條虛線標出這一折的**買進門檻**。
+- **右邊 K 線**：還原股價，全範圍時 X 軸固定為整個實驗期間，Y 軸依畫面內股價自動調整（`L` 切換對數／線性），
+  依縮放自動用日／週／月／季 K。藍色底色是當次選股的**回推範圍**，藍線是該範圍的對數線性迴歸，延伸到整個畫面，
+  虛線為 ±1σ。`Enter` 放大到「回推起點 → 下次換股」，橘色短線是「一致性」各子段各自的迴歸；放大時按 `←` `→`
+  逐月看下去。K 線下方的色帶是這檔股票被持有的期間。
+- **分數子圖**：這檔股票在**每一次**換股算出的分數（不是只有上榜那幾次），Y 軸固定為該實驗所有曾上榜股票的分數範圍。
+  依資料視覺化的慣例沒有疊在 K 線上用第二個 Y 軸，而是放在共用 X 軸的子圖。
+- **實驗成果區**：年化報酬、Sharpe、最大回檔、最差一年、超額報酬等，以及對數權益曲線（點一下跳到該次換股）。
+  `1`–`7` 或上方標籤切換實驗，日期與目前個股會保留；網址會記住實驗、日期、個股與縮放，可以直接分享。
+
+資料都是預先算好的靜態檔：`data/exp/<實驗>.json`（每個約 1.3–2.3 MB）與 `data/px/<代號>.json`
+（1,292 檔曾上榜股票的日 K，共約 81 MB、壓縮後約 28 MB，點到才下載）。股價存成 0.05% 精度的對數刻度整數；
+排行榜與分數子圖用的是程式算的正式分數，分數的分項由瀏覽器依存下的股價重算，與正式值通常差 0.03%。
+
+### 疊加型 Equity Curve（`results/explore/<實驗>/stacked.png`）
+
+![上線版的疊加型 equity curve](results/explore/prod/stacked.png)
+
+總權益＝現金＋每檔持股的市值，每檔各自一個色塊疊起來；上圖是金額，下圖是占權益比例（早年金額小，看下圖）。
+要讓同一檔股票的色塊接在一起，關鍵是**下面的色塊在換股時不要變**：
+
+- **分層**：一檔股票連續持有的期間占同一層；它被汰除時，**新進的股票接手那一層**。等權重下新股和舊股市值相近，
+  所以上面每一層的位置幾乎不動，色塊自然相連。
+- **排序**：再把「換手最少」的層放到最下面，並以局部搜尋調整層的順序，讓所有延續中色塊在換股瞬間的跳動總和最小。
+- 也試了需求檔提的「連續愈久的畫在愈下面」直接排法（最長的先放、放進最低的空層）。它會多出空層，空層一出現上面的
+  色塊就整片跳動；以「延續色塊的跳動總和」衡量，接手分層比它少 21–41%（上線版 28.1 對 35.8，全期 21.8 對 37.0，預設參數 37.1 對 49.4），
+  程式兩種都算、取小的。實際結果：長期持有的股票確實多半落在底層（全期版中保科的兩段長期持有都在最底層；台積電連續持有 86 次，是一條沒有斷的色帶）。
+- 顏色一檔一色、整段歷史不變，相鄰或交接的兩檔盡量不同色；夠長夠寬的色塊直接標股名。
+
+walk-forward 的每一折都從現金重新開始，所以折與折交界會有一小段灰色（現金），色塊在那裡斷開。
+
+---
+
 ## 專案結構
 
 ```
@@ -393,11 +464,14 @@ src/twstable/
   wfcv.py        Walk-Forward 交叉驗證
   sweep.py       換股日 × 假日規則 × 持股檔數的實驗（計算，存 grid.csv / curves.parquet）
   sweep_report.py  實驗的熱力圖、檢定與 SUMMARY.md（只讀存檔，不跑回測）
+  explore.py     逐次換股重播實驗（排行榜、分數、每日持股市值）→ results/explore/
+  stacked.py     疊加型 equity curve（分層、排序、配色）
+  viewer_build.py  把重播結果與股價匯出成網頁 viewer 的靜態資料
   report.py      產生單檔 HTML 報告
-  templates/     報告的 HTML 樣板
+  templates/     報告與 viewer 的 HTML 樣板
   viewers/       兩個 matplotlib GUI
-docs/            產生出來的網頁報告（可直接給 GitHub Pages 用）
-tests/           83 個測試
+docs/            產生出來的網頁報告與 viewer（可直接給 GitHub Pages 用）
+tests/           98 個測試
 ```
 
 其中幾個測試值得特別一提：

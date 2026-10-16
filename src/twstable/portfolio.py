@@ -288,6 +288,54 @@ def target_values(
     return {i: invested * float(w) for i, w in zip(targets, share, strict=True)}
 
 
+@dataclass
+class Decisions:
+    """Everything the strategy decides from, before any money moves.
+
+    ``eligible`` is the liquidity / price / valid-window screen at each signal
+    bar; the engine additionally requires a price on the trade bar itself.
+    """
+
+    lo: int
+    hi: int
+    first: int
+    signal_days: np.ndarray
+    scores: ScoreResult
+    eligible: np.ndarray  # (n_signals, n_stocks)
+
+
+def plan_decisions(
+    market: Market,
+    params: StrategyParams,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+) -> Decisions:
+    """Signal bars, scores and eligibility of a run, exactly as the engine sees them."""
+    dates = market.dates
+    close = market.close
+
+    lo = 0 if start is None else int(dates.searchsorted(pd.Timestamp(start)))
+    hi = len(dates) - 1 if end is None else int(dates.searchsorted(pd.Timestamp(end)))
+    hi = min(hi, len(dates) - 1)
+
+    # Need a full lookback before the first decision, and one spare bar to trade on.
+    first = max(lo, params.score.window + 1)
+    if first >= hi:
+        raise ValueError("not enough history in the requested range")
+
+    signal_days = signal_schedule(dates, first, hi, params)
+    if not len(signal_days):
+        raise ValueError("no rebalance dates in the requested range")
+
+    res: ScoreResult = compute_scores(market.pref, market.log_px, signal_days, params.score)
+    liquidity = _trailing_mean_dollar_volume(market.dvol_cum, signal_days, params.score.window)
+
+    price_ok = close[signal_days] >= params.min_price
+    eligible = res.valid & price_ok & (liquidity >= params.min_dollar_volume)
+    eligible &= np.isfinite(close[signal_days])
+    return Decisions(lo, hi, first, signal_days, res, eligible)
+
+
 def run_backtest(
     market: Market | Panel,
     params: StrategyParams,
@@ -305,30 +353,11 @@ def run_backtest(
         market = prepare_market(market)
     dates = market.dates
     close = market.close
-    log_px = market.log_px
-    pref = market.pref
-    dvol_cum = market.dvol_cum
     stock_ids = market.stock_ids
 
-    lo = 0 if start is None else int(dates.searchsorted(pd.Timestamp(start)))
-    hi = len(dates) - 1 if end is None else int(dates.searchsorted(pd.Timestamp(end)))
-    hi = min(hi, len(dates) - 1)
-
-    # Need a full lookback before the first decision, and one spare bar to trade on.
-    first = max(lo, params.score.window + 1)
-    if first >= hi:
-        raise ValueError("not enough history in the requested range")
-
-    signal_days = signal_schedule(dates, first, hi, params)
-    if not len(signal_days):
-        raise ValueError("no rebalance dates in the requested range")
-
-    res: ScoreResult = compute_scores(pref, log_px, signal_days, params.score)
-    liquidity = _trailing_mean_dollar_volume(dvol_cum, signal_days, params.score.window)
-
-    price_ok = close[signal_days] >= params.min_price
-    eligible_all = res.valid & price_ok & (liquidity >= params.min_dollar_volume)
-    eligible_all &= np.isfinite(close[signal_days])
+    dec = plan_decisions(market, params, start, end)
+    lo, hi, first = dec.lo, dec.hi, dec.first
+    signal_days, res, eligible_all = dec.signal_days, dec.scores, dec.eligible
 
     # --- simulation ------------------------------------------------------
     cash = float(initial_capital)

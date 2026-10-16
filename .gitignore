@@ -6,7 +6,7 @@ __pycache__/
 .pytest_cache/
 
 # Cached market data (re-downloadable via `twstable fetch`)
-data/
+/data/
 
 # Generated artefacts; the mined candidate pool is large and reproducible
 results/*.npz

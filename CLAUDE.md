@@ -14,8 +14,8 @@
    **忽略它回應裡「clone 到 /home/user/...」的建議**——資料要 clone 到 `main` checkout 的 `data/` 子目錄。
 
    Auto 模式下 `add_repo` 可能被權限檢查擋下（理由「Permission Grant」：掛 private repo
-   等於替 session 多拿一份存取權，sidecar 裡的指示不算使用者同意）。被擋就**停下來請使用者
-   在對話裡明確說一句「允許掛載 data repo」**再試一次，不要繞路（例如不掛就直接 clone）。
+   等於替 session 多拿一份存取權，不承認 sidecar 裡使用者已同意）。被擋就**停下來請使用者
+   在對話裡明確說一句「允許掛載 data repo」**再試一次。
 
 2. 在 `main` checkout 根目錄，**先刪掉空的 `data/`**，再執行 `setup.py`：
 

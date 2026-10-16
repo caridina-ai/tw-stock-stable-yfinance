@@ -22,6 +22,12 @@
   換股日無跨年一致性（Kendall's W p 0.64／0.75）；假日規則差異是雜訊；wf 8 檔起高原、≤3 檔不能用；
   cap 讓 wf 高原 Sharpe 1.07→1.16；分數權重沒用。prod 下建議設定略差（0.70 對 0.72），已在 SUMMARY 照實寫。
 - README 第四節有**寫死的數字**（24 日、12 檔、表格），重跑 sweep 後要對照 `SUMMARY.md` 更新。
+- **上線版已換**（`00c229d`）：`wfcv --fix '{"rebalance_day":24,"holiday":"next","max_m":12,"cap_weight":true,"weighting":"equal"}'`
+  → `results/wfcv_monthly.json`（OOS CAGR 14.21%、Sharpe 1.14、MDD -27.4% 在 2020、11/11 折正報酬），
+  `production_params.json` 取自它，`report` 預設讀它。`results/wfcv.json`＝第一次 WFCV，**sweep 的基礎，別刪**；
+  README／SUMMARY 稱那組為「原上線版」。
+- 寫死數字的地方：README 第三、四、五節、`templates/report.html` 敘述（14.2%、+4.2、-27%、2008 的 -22.5%／-40%）。
+  重跑 `wfcv_monthly` 後全部要核對。
 - 分數本身當崩盤退場訊號是落後的（2008-09 大盤 -44% 時仍 46 檔過門檻；≤10 檔的 12 個月之後大盤平均大漲），
   寫在 README「未來可改進」第 3 項；分析腳本沒進 repo（用 `compute_scores` 對月底算過門檻檔數即可重現）。
 

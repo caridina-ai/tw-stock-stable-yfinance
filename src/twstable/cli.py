@@ -229,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     w.set_defaults(func=cmd_wfcv)
 
     r = sub.add_parser("report", help="build the shareable HTML report (docs/index.html)")
-    r.add_argument("--result", help="backtest JSON to render (default results/wfcv.json)")
+    r.add_argument("--result", help="backtest JSON to render (default results/wfcv_monthly.json)")
     r.add_argument("--out", help="output HTML path (default docs/index.html)")
     r.add_argument(
         "--fragment",

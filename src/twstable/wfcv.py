@@ -332,6 +332,11 @@ def run_wfcv(
 # ---------------------------------------------------------------------------
 
 
+def _schedule(p: StrategyParams) -> str:
+    """Trading-day interval, or "d24" for the 24th of every month."""
+    return f"d{p.rebalance_day}" if p.rebalance_day else str(p.rebalance)
+
+
 def _fold_table(results: list[FoldResult]) -> str:
     head = (
         f"{'fold':>4} {'test period':<23} {'yrs':>4} "
@@ -347,7 +352,7 @@ def _fold_table(results: list[FoldResult]) -> str:
             f"{fr.fold.index:>3}{mark} {period:<23} {o['years']:>4.1f} "
             f"{o['cagr']:>+8.2%} {o['sharpe']:>7.2f} {o['max_drawdown']:>8.2%} "
             f"{o['calmar']:>7.2f} {fr.is_sharpe:>10.2f} "
-            f"{o['positive_months']:>5.0%} {fr.params.rebalance:>4} {fr.params.max_m:>3}"
+            f"{o['positive_months']:>5.0%} {_schedule(fr.params):>4} {fr.params.max_m:>3}"
         )
     if any(fr.partial for fr in results):
         lines.append("  * partial fold (test window truncated by end of data)")

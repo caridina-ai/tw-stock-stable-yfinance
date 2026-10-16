@@ -30,7 +30,8 @@ import pandas as pd
 from .config import RESULTS_DIR, ROOT
 
 TEMPLATE = Path(__file__).parent / "templates" / "report.html"
-DEFAULT_RESULT = RESULTS_DIR / "wfcv.json"
+# the production strategy: the walk-forward run with the monthly schedule pinned
+DEFAULT_RESULT = RESULTS_DIR / "wfcv_monthly.json"
 DEFAULT_OUT = ROOT / "docs" / "index.html"
 
 PAGE_TITLE = "長期穩定上漲股策略 — 二十年 Walk-Forward 實測"

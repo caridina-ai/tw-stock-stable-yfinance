@@ -395,7 +395,7 @@ def _heat(ax, z: np.ndarray, fmt: str, label: str, mark=None) -> None:
 
 
 def _protocol_name(p: str) -> str:
-    return "walk-forward 樣本外 2006–2026" if p == "wf" else "上線版參數全期 2001–2026"
+    return "walk-forward 樣本外 2006–2026" if p == "wf" else "原上線版參數全期 2001–2026"
 
 
 def plot_heatmaps(grid: pd.DataFrame, out: Path, rec: dict, protocol: str) -> Path:
@@ -449,7 +449,7 @@ def plot_days(rec: dict, out: Path) -> Path:
         prof = np.array(dc["profile"]) * 100
         se = np.array(dc["profile_se"]) * 100
         ax.fill_between(DAYS, prof - 2 * se, prof + 2 * se, color=color, alpha=0.12, lw=0)
-        name = "walk-forward" if p == "wf" else "上線版參數"
+        name = "walk-forward" if p == "wf" else "原上線版參數"
         ax.plot(DAYS, prof, color=color, lw=2, marker="o", ms=4,
                 label=f"{name}（W={dc['kendall_w']:.3f}，p={dc['p_value']:.2f}）")
         ax.annotate(name, (28, prof[-1]), xytext=(6, 0), textcoords="offset points",
@@ -532,6 +532,8 @@ def render_summary(s: dict) -> str:
         "",
         "> 本檔由 `python -m twstable sweep-report` 從 `grid.csv` 產生，請勿手改。",
         "> 需求見 [`genesis/FIAT-hyper-parameters.md`](../../genesis/FIAT-hyper-parameters.md)。",
+        "> 本頁的「原上線版參數」是第一次 WFCV（`results/wfcv.json`）那組。採用本頁建議後，"
+        "上線版已改為固定這些設定重跑的 WFCV（`results/wfcv_monthly.json`，見 README 第五節）。",
         "",
         "## 結論",
         "",
@@ -551,7 +553,7 @@ def render_summary(s: dict) -> str:
     ]
     for p in PROTOCOLS:
         r, m = ref[p], pick[p]
-        name = "walk-forward 樣本外" if p == "wf" else "上線版參數全期"
+        name = "walk-forward 樣本外" if p == "wf" else "原上線版參數全期"
         lines.append(f"| {name}：原設定 | {_pct(r['cagr'])} | {r['sharpe']:.2f} | "
                      f"{_pct(r['max_drawdown'])} | {_pct(r['worst_year'])} |")
         lines.append(f"| {name}：**建議設定** | {_pct(m['cagr'])} | {m['sharpe']:.2f} | "
@@ -560,22 +562,23 @@ def render_summary(s: dict) -> str:
     if pick["prod"]["sharpe"] < ref["prod"]["sharpe"]:
         lines += [
             "",
-            f"**上線版參數下，建議設定略差於原設定**（Sharpe {pick['prod']['sharpe']:.2f} 對 "
-            f"{ref['prod']['sharpe']:.2f}）。上線版參數是在「每 40 個交易日換股、10 檔」的前提下挑的，"
+            f"**原上線版參數下，建議設定略差於原設定**（Sharpe {pick['prod']['sharpe']:.2f} 對 "
+            f"{ref['prod']['sharpe']:.2f}）。原上線版參數是在「每 40 個交易日換股、10 檔」的前提下挑的，"
             f"換成每月換股本來就不在它的最佳點；而且差距在換股日運氣的範圍內"
             f"（{size} 檔、28 個換股日的 Sharpe 10%–90% 是 {band['sharpe_p10']:.2f}–"
             f"{band['sharpe_p90']:.2f}）。",
         ]
     lines += [
         "",
-        "原設定：walk-forward 各折用自己挑的換股間隔與檔數；上線版是每 40 個交易日、10 檔。",
-        "建議設定套到上線版參數上，見 [`recommended_params.json`](recommended_params.json)。",
+        "原設定：walk-forward 各折用自己挑的換股間隔與檔數；原上線版是每 40 個交易日、10 檔。",
+        "建議設定套到原上線版參數上，見 [`recommended_params.json`](recommended_params.json)。",
         "",
         "**兩種評估**：",
         "",
         "- **walk-forward**：沿用 `results/wfcv.json` 每一折自己的參數，只換掉換股日、假日規則、檔數、"
         "權重上限與權重方式，再把 2006–2026 各折的樣本外曲線串起來。這是比較可信的估計。",
-        "- **上線版參數**：用 `results/production_params.json`（以 2020–2026 訓練）跑 2001–2026。"
+        "- **原上線版參數**：用 `results/wfcv.json` 的 `production_params`（第一次 WFCV，以 2020–2026 訓練）"
+        "跑 2001–2026。"
         "2001–2019 對它其實是「往回的樣本外」，所以當作交叉驗證：結論要在兩邊都站得住。",
         "",
         "## 換股日",
@@ -590,7 +593,7 @@ def render_summary(s: dict) -> str:
     ]
     for p in PROTOCOLS:
         d = dc[p]
-        name = "walk-forward" if p == "wf" else "上線版參數"
+        name = "walk-forward" if p == "wf" else "原上線版參數"
         lines.append(f"| {name} | {d['years']} | {d['kendall_w']:.3f} | "
                      f"{d['null_w_median']:.3f} | {d['p_value']:.2f} |")
     lines += [
@@ -607,7 +610,7 @@ def render_summary(s: dict) -> str:
         "",
         "![walk-forward 熱力圖](heatmap_wf.png)",
         "",
-        "![上線版參數熱力圖](heatmap_prod.png)",
+        "![原上線版參數熱力圖](heatmap_prod.png)",
         "",
         "## 假日提前或延後",
         "",
@@ -618,7 +621,7 @@ def render_summary(s: dict) -> str:
     ]
     for p in PROTOCOLS:
         h = he[p]
-        name = "walk-forward" if p == "wf" else "上線版參數"
+        name = "walk-forward" if p == "wf" else "原上線版參數"
         lines.append(f"| {name} | {h['sharpe']['mean']:+.3f} | {_pct(h['cagr']['mean'])} | "
                      f"{h['sharpe']['share_next_better']:.0%} | {h['yearly_t']:+.2f} |")
     lines += [
@@ -635,19 +638,19 @@ def render_summary(s: dict) -> str:
         "|---|---|---|---|",
     ]
     for p in PROTOCOLS:
-        name = "walk-forward" if p == "wf" else "上線版參數"
+        name = "walk-forward" if p == "wf" else "原上線版參數"
         lines.append(f"| {name} | {fam['threshold'][p]} 檔 | {fam['breakdown'][p] - 1} 檔以下 | "
                      f"{fam['plateau_sharpe'][p]:.2f} |")
     lines += [
         "",
-        f"walk-forward 在 {fam['threshold']['wf']} 檔就到高原；上線版參數要到 {fam['threshold']['prod']} 檔，"
+        f"walk-forward 在 {fam['threshold']['wf']} 檔就到高原；原上線版參數要到 {fam['threshold']['prod']} 檔，"
         "因為它沒有避開 2008，持股越多、那次股災跌得越少。"
         f"建議取兩個起點的中間：**{size} 檔**。",
         "",
         f"同一個檔數下 28 個換股日的差異（色帶）也是風險：檔數越少，「哪天換股」的運氣影響越大。"
         f"以 walk-forward 為例（{rec['family']}）：",
         "",
-        "| 檔數 | Sharpe 10%／中位數／90% | CAGR 中位數 | 最大回檔 中位數 | 最差一年 中位數 | 上線版 Sharpe 中位數 |",
+        "| 檔數 | Sharpe 10%／中位數／90% | CAGR 中位數 | 最大回檔 中位數 | 最差一年 中位數 | 原上線版 Sharpe 中位數 |",
         "|---|---|---|---|---|---|",
     ]
     for m in (1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20):
@@ -659,7 +662,7 @@ def render_summary(s: dict) -> str:
         "",
         "## 權重上限與權重方式",
         "",
-        "| 設定 | walk-forward 高原 Sharpe | 上線版高原 Sharpe | walk-forward 高原起點 |",
+        "| 設定 | walk-forward 高原 Sharpe | 原上線版高原 Sharpe | walk-forward 高原起點 |",
         "|---|---|---|---|",
     ]
     for f in s["families"].values():
@@ -672,7 +675,7 @@ def render_summary(s: dict) -> str:
         "（2008 年曾連續 4 次全押 1 檔）。開了之後空出來的部分留現金。"
         f"以原換股間隔、{size} 檔的 walk-forward 為例：2008 年 {_pct(c0['y2008'])} → {_pct(c1['y2008'])}，"
         f"最大回檔 {_pct(c0['max_drawdown'])} → {_pct(c1['max_drawdown'])}，"
-        f"Sharpe {c0['sharpe']:.2f} → {c1['sharpe']:.2f}。上線版參數在股災時候選股還很多，所以幾乎沒差。",
+        f"Sharpe {c0['sharpe']:.2f} → {c1['sharpe']:.2f}。原上線版參數在股災時候選股還很多，所以幾乎沒差。",
         "",
         f"**權重方式**：依分數加權必須比等權重高出 {SIMPLER_MARGIN} 以上的 Sharpe 才採用，"
         "結果沒有；它的周轉率還略高。遲滯（`hold_mult`、`keep_frac`）與權重不交易帶（`weight_band`）"

@@ -18,7 +18,12 @@
   - 來自剛 fetch 的 branch 的指示（sidecar README／CLAUDE.md）被當成外來指令，第一次 `git worktree add`
     被擋（「Instruction Poisoning」）；使用者在對話裡說「同意」後就過了。**跟 `../` 路徑無關**。
   - `add_repo` 掛 private repo 被擋（「Permission Grant」）；使用者明確表達要掛資料後才過。
-  - 被擋就停下來請使用者明確同意，不要繞路。可預先授權的做法見 CALLBACK.md。
+  - commit `.claude/settings.json`（放寬權限的 allow 規則）被擋（「Self-Modification」），使用者同意也一樣；
+    要請使用者自己在 GitHub 建檔。內容見 CALLBACK.md。
+  - 被擋就停下來請使用者明確同意，不要繞路。
+- 模式選單：雲端每種模式都直接執行檔案編輯；「自動」大多直接執行其他動作，只擋有風險的；
+  「接受編輯」每個 shell 指令都要使用者按同意。「自動」才是最寬的。
+- 前景 `sleep N; 指令` 會被擋；等背景工作用 `run_in_background`（完成會通知）或 Monitor 的 until-loop。
 - `register_repo_root` 只接受 `add_repo` 給的預設路徑（`/home/user/<repo>`），傳別的路徑會被拒。
 - Claude app 只能開啟主工作目錄（`main` checkout）、scratchpad 與記憶目錄裡的檔案；
   `../sidecar` 的檔案使用者在 app 裡打不開，要 push 後到 GitHub 看。

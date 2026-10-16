@@ -172,8 +172,15 @@ def search_fold(
     trials: int,
     rng: np.random.Generator,
     progress: bool = True,
+    fixed: dict | None = None,
 ) -> tuple[StrategyParams, float, BacktestResult]:
-    """Random-search the training slice; return the best configuration."""
+    """Random-search the training slice; return the best configuration.
+
+    ``fixed`` pins some parameters (e.g. the monthly trade day and the book
+    size) for every candidate.  They are applied after drawing, so the random
+    stream -- and with it every other parameter of every candidate -- is the
+    same as an unpinned search with the same seed.
+    """
     best_params: StrategyParams | None = None
     best_obj = -np.inf
     best_res: BacktestResult | None = None
@@ -184,6 +191,8 @@ def search_fold(
         it = tqdm(it, desc=f"fold {fold.index} search", unit="trial", leave=False)
     for _ in it:
         params = sample_params(rng)
+        if fixed:
+            params = params.replace(**fixed)
         try:
             res = run_backtest(
                 market, params, start=fold.train_start, end=fold.train_end, record=False
@@ -257,12 +266,15 @@ def run_wfcv(
     test_years: float,
     trials: int,
     seed: int,
+    fixed: dict | None = None,
 ) -> tuple[list[FoldResult], BacktestResult, StrategyParams]:
     folds = make_folds(market.dates, start, end, train_years, test_years)
     if not folds:
         raise SystemExit("no folds fit in the requested range; shorten --train-years")
 
     print(f"{len(folds)} walk-forward folds, {trials} trials each")
+    if fixed:
+        print(f"pinned for every candidate: {json.dumps(fixed)}")
     for f in folds:
         print("  " + f.describe())
     print()
@@ -270,7 +282,7 @@ def run_wfcv(
     rng = np.random.default_rng(seed)
     results: list[FoldResult] = []
     for fold in folds:
-        params, is_obj, is_res = search_fold(market, fold, trials, rng)
+        params, is_obj, is_res = search_fold(market, fold, trials, rng, fixed=fixed)
         oos = run_backtest(
             market, params, start=fold.test_start, end=fold.test_end, record=True
         )
@@ -310,7 +322,7 @@ def run_wfcv(
     )
     print("\nre-fitting production parameters on the most recent training window")
     print("  " + f"{prod_fold.train_start.date()}..{prod_fold.train_end.date()}")
-    prod_params, _, _ = search_fold(market, prod_fold, trials, rng)
+    prod_params, _, _ = search_fold(market, prod_fold, trials, rng, fixed=fixed)
 
     return results, combined, prod_params
 
@@ -387,7 +399,16 @@ def print_wfcv_report(
     print(json.dumps(prod.to_dict(), indent=2))
 
 
+def _load_fixed(spec: str | None) -> dict:
+    if not spec:
+        return {}
+    path = Path(spec)
+    return json.loads(path.read_text(encoding="utf-8") if path.exists() else spec)
+
+
 def run_wfcv_cli(args) -> int:
+    fixed = _load_fixed(getattr(args, "fix", None))
+    StrategyParams().replace(**fixed)  # fail on a misspelt name before the long search
     panel = load_panel()
     market = prepare_market(panel)
 
@@ -399,6 +420,7 @@ def run_wfcv_cli(args) -> int:
         test_years=args.test_years,
         trials=args.trials,
         seed=args.seed,
+        fixed=fixed,
     )
     print_wfcv_report(results, combined, prod)
 
@@ -409,6 +431,7 @@ def run_wfcv_cli(args) -> int:
         "test_years": args.test_years,
         "trials": args.trials,
         "seed": args.seed,
+        "fixed": fixed,
         "production_params": prod.to_dict(),
         "folds": [
             {

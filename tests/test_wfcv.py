@@ -145,3 +145,22 @@ class BacktestResultStub:
         self.rebalances: list = []
         self.cost_paid = 0.0
         self.n_trades = 0
+
+
+def test_pinned_parameters_leave_the_rest_of_the_search_unchanged() -> None:
+    from twstable.wfcv import Fold, sample_params, search_fold
+
+    market = prepare_market(make_panel(n_days=1500, seed=2))
+    d = market.dates
+    fold = Fold(1, d[0], d[1000], d[1000], d[1400])
+    fixed = {"rebalance_day": 24, "max_m": 3, "cap_weight": True}
+
+    best, _, res = search_fold(market, fold, 6, np.random.default_rng(5), progress=False,
+                               fixed=fixed)
+    assert (best.rebalance_day, best.max_m, best.cap_weight) == (24, 3, True)
+    assert res.n_rebalances > 20  # monthly, not every `rebalance` bars
+
+    # the winner is one of the draws an unpinned search with this seed makes, pinned
+    rng = np.random.default_rng(5)
+    drawn = [sample_params(rng).replace(**fixed) for _ in range(6)]
+    assert best in drawn

@@ -220,6 +220,11 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--test-years", type=float, default=2.0)
     w.add_argument("--trials", type=int, default=300)
     w.add_argument("--seed", type=int, default=20260805)
+    w.add_argument(
+        "--fix",
+        help="JSON file or inline JSON of parameters pinned for every candidate, "
+        'e.g. \'{"rebalance_day": 24, "max_m": 12}\'',
+    )
     w.add_argument("--out", help="output JSON path")
     w.set_defaults(func=cmd_wfcv)
 

@@ -153,6 +153,12 @@ def cmd_report(args: argparse.Namespace) -> int:
     return run_report_cli(args)
 
 
+def cmd_sweep(args: argparse.Namespace) -> int:
+    from .sweep import run_sweep_cli
+
+    return run_sweep_cli(args)
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -220,6 +226,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     r.add_argument("--freq", default="W", help="resampling frequency for the chart (default W)")
     r.set_defaults(func=cmd_report)
+
+    s = sub.add_parser("sweep", help="sweep the monthly trade day, holiday rule and book size")
+    s.add_argument("--wfcv", help="WFCV result whose folds to reuse (default results/wfcv.json)")
+    s.add_argument("--out-dir", help="output directory (default results/hyper)")
+    s.add_argument("--workers", type=int, default=0, help="processes (default: all cores)")
+    s.set_defaults(func=cmd_sweep)
 
     return p
 

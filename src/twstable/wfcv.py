@@ -200,16 +200,12 @@ def search_fold(
     return best_params, best_obj, best_res
 
 
-def stitch(fold_results: list[FoldResult], market: Market) -> BacktestResult:
-    """Chain the per-fold out-of-sample runs into one continuous curve."""
+def chain_equity(curves: list[pd.Series]) -> pd.Series:
+    """Chain consecutive equity curves into one, each starting where the last ended."""
     pieces: list[pd.Series] = []
-    rebalances: list = []
     level = 1.0
-    cost = 0.0
-    trades = 0
-
-    for fr in fold_results:
-        eq = fr.oos.equity.dropna()
+    for curve in curves:
+        eq = curve.dropna()
         if eq.empty:
             continue
         scaled = eq / float(eq.iloc[0]) * level
@@ -218,13 +214,26 @@ def stitch(fold_results: list[FoldResult], market: Market) -> BacktestResult:
         pieces.append(scaled)
         if len(scaled):
             level = float(scaled.iloc[-1])
-        rebalances.extend(fr.oos.rebalances)
-        cost += fr.oos.cost_paid
-        trades += fr.oos.n_trades
 
     equity = pd.concat(pieces)
     equity = equity[~equity.index.duplicated(keep="first")].sort_index()
     equity.name = "equity"
+    return equity
+
+
+def stitch(fold_results: list[FoldResult], market: Market) -> BacktestResult:
+    """Chain the per-fold out-of-sample runs into one continuous curve."""
+    rebalances: list = []
+    cost = 0.0
+    trades = 0
+    for fr in fold_results:
+        if fr.oos.equity.dropna().empty:
+            continue
+        rebalances.extend(fr.oos.rebalances)
+        cost += fr.oos.cost_paid
+        trades += fr.oos.n_trades
+
+    equity = chain_equity([fr.oos.equity for fr in fold_results])
 
     bench = market.benchmark.reindex(equity.index).ffill()
     if bench.notna().any():

@@ -9,7 +9,7 @@ import pytest
 from twstable.config import FEE_RATE, SELL_TAX_RATE
 from twstable.data import Panel
 from twstable.metrics import cagr, compute_metrics, drawdown, max_drawdown
-from twstable.portfolio import StrategyParams, run_backtest, select_targets
+from twstable.portfolio import StrategyParams, run_backtest, select_targets, signal_schedule
 from twstable.score import ScoreParams
 
 
@@ -192,6 +192,76 @@ def test_weight_band_reduces_trading() -> None:
     loose = run_backtest(panel, StrategyParams(max_m=4, min_dollar_volume=0.0,
                                                weight_band=0.5), initial_capital=1e6)
     assert loose.n_trades < tight.n_trades
+
+
+# --- monthly schedule and weight cap -------------------------------------
+
+
+def test_monthly_schedule_trades_on_the_day_or_the_nearest_trading_day() -> None:
+    dates = pd.bdate_range("2024-01-01", "2024-12-31")
+    first, hi = 5, len(dates) - 1
+    # 2024-06-15 is a Saturday: "next" trades Monday 17th, "prev" Friday 14th
+    for holiday, june in (("next", "2024-06-17"), ("prev", "2024-06-14")):
+        p = StrategyParams(rebalance_day=15, holiday=holiday)
+        signal = signal_schedule(dates, first, hi, p)
+        trade = dates[signal + 1]
+        assert len(trade) == 12
+        assert pd.Timestamp(june) in trade
+        assert (trade.to_period("M") == pd.period_range("2024-01", "2024-12", freq="M")).all()
+        fifteenths = pd.DatetimeIndex([f"2024-{m:02d}-15" for m in range(1, 13)])
+        assert (trade[trade.day == 15] == fifteenths[fifteenths.weekday < 5]).all()
+
+
+def test_monthly_schedule_stays_inside_the_range() -> None:
+    dates = pd.bdate_range("2024-01-01", "2024-12-31")
+    first, hi = 30, 200
+    for holiday in ("next", "prev"):
+        for day in (1, 28):
+            p = StrategyParams(rebalance_day=day, holiday=holiday)
+            signal = signal_schedule(dates, first, hi, p)
+            assert (signal >= first).all() and (signal + 1 <= hi).all()
+            assert (np.diff(signal) > 0).all()
+
+
+def test_monthly_schedule_rejects_bad_settings() -> None:
+    dates = pd.bdate_range("2024-01-01", "2024-12-31")
+    with pytest.raises(ValueError):
+        signal_schedule(dates, 0, 100, StrategyParams(rebalance_day=31))
+    with pytest.raises(ValueError):
+        signal_schedule(dates, 0, 100, StrategyParams(rebalance_day=5, holiday="skip"))
+
+
+def test_interval_schedule_is_unchanged() -> None:
+    dates = pd.bdate_range("2024-01-01", "2024-12-31")
+    p = StrategyParams(rebalance=20)
+    assert (signal_schedule(dates, 7, 200, p) == np.arange(7, 200, 20)).all()
+
+
+def test_cap_weight_keeps_cash_when_too_few_names_qualify() -> None:
+    """One qualifying name with max_m=4: all-in by default, a quarter when capped."""
+    n = 900
+    panel = make_panel({"0001": 100 * np.exp(np.linspace(0, 0.5, n))}, n)
+    base = StrategyParams(max_m=4, min_score=0.0, min_dollar_volume=0.0)
+
+    spread = run_backtest(panel, base, initial_capital=1e6)
+    capped = run_backtest(panel, base.replace(cap_weight=True), initial_capital=1e6)
+
+    assert spread.rebalances[0].holdings[0]["weight"] == pytest.approx(1.0, abs=0.01)
+    assert capped.rebalances[0].holdings[0]["weight"] == pytest.approx(0.25, abs=0.01)
+    stock = panel.close["0001"]
+    stock_ret = stock.loc[capped.equity.index[-1]] / stock.loc[capped.equity.index[0]] - 1
+    capped_ret = capped.equity.iloc[-1] / capped.equity.iloc[0] - 1
+    assert 0 < capped_ret < 0.5 * stock_ret
+
+
+def test_monthly_backtest_trades_once_a_month() -> None:
+    n = 900
+    panel = make_panel({"0001": 100 * np.exp(np.linspace(0, 0.5, n))}, n)
+    p = StrategyParams(max_m=1, min_score=0.0, min_dollar_volume=0.0, rebalance_day=10)
+    res = run_backtest(panel, p, initial_capital=1e6)
+    trade = pd.DatetimeIndex([rb.trade_date for rb in res.rebalances])
+    assert trade.to_period("M").is_unique
+    assert (trade.day >= 10).all() and (trade.day <= 12).all()  # make_panel is Mon-Fri
 
 
 # --- metrics ---------------------------------------------------------------

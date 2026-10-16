@@ -2,9 +2,9 @@
 
 Strategy
 --------
-Every ``rebalance`` trading days, score the whole market with
-:mod:`twstable.score`, keep the eligible names with the highest scores, and hold
-them equally weighted.
+Every ``rebalance`` trading days -- or on a fixed day of every month, see
+``rebalance_day`` -- score the whole market with :mod:`twstable.score`, keep
+the eligible names with the highest scores, and hold them equally weighted.
 
 Two details matter more than they look:
 
@@ -44,6 +44,22 @@ class StrategyParams:
     rebalance: int = 20
     """Trading days between re-selections (20 ~ one month)."""
 
+    rebalance_day: int = 0
+    """Trade on this calendar day of every month (1-28) instead.
+
+    0 keeps the fixed ``rebalance`` interval.  The day is the *trade* date: the
+    selection uses the close of the trading day before it, exactly like the
+    interval schedule, so "day 11" means pick on the evening of the 10th and
+    trade on the 11th.
+    """
+
+    holiday: str = "next"
+    """What to do when ``rebalance_day`` is not a trading day.
+
+    ``"next"`` trades on the first trading day after it (延後), ``"prev"`` on
+    the last one before it (提前).
+    """
+
     min_score: float = 0.15
     """A stock must score at least this to be bought."""
 
@@ -67,6 +83,14 @@ class StrategyParams:
 
     min_price: float = 5.0
     """Penny-stock floor, in TWD."""
+
+    cap_weight: bool = False
+    """Cap every position at ``1 / max_m`` of the book and keep the rest in cash.
+
+    Off, the book is split evenly over whatever qualified, so a month in which
+    only one name clears ``min_score`` puts the whole account in that name --
+    which the 2008 fold of the walk-forward run did for four rebalances in a row.
+    """
 
     def replace(self, **kw: Any) -> StrategyParams:
         return replace(self, **kw)
@@ -176,6 +200,35 @@ def _trailing_mean_dollar_volume(
     return (dvol_cum[ends + 1] - dvol_cum[starts]) / np.maximum(span, 1.0)
 
 
+def signal_schedule(
+    dates: pd.DatetimeIndex, first: int, hi: int, params: StrategyParams
+) -> np.ndarray:
+    """Row indices of the decision bars; each one trades on the bar after it.
+
+    Every index is in ``[first, hi)`` so the trade bar is never past ``hi``.
+    """
+    if not params.rebalance_day:
+        return np.arange(first, hi, params.rebalance, dtype="int64")
+
+    day = int(params.rebalance_day)
+    if not 1 <= day <= 28:
+        raise ValueError(f"rebalance_day must be 1..28, got {day}")
+    if params.holiday not in ("next", "prev"):
+        raise ValueError(f"holiday must be 'next' or 'prev', got {params.holiday!r}")
+
+    # one month past the end: with "prev", next month's day 1 can fall back into range
+    months = pd.period_range(dates[first], dates[hi] + pd.DateOffset(months=1), freq="M")
+    targets = pd.DatetimeIndex([pd.Timestamp(m.year, m.month, day) for m in months])
+    if params.holiday == "next":
+        trade = dates.searchsorted(targets, side="left")  # first bar on or after
+    else:
+        # past the last bar there is no telling which day was the last one before it
+        targets = targets[targets <= dates[-1]]
+        trade = dates.searchsorted(targets, side="right") - 1  # last bar on or before
+    signal = np.unique(np.asarray(trade, dtype="int64")) - 1
+    return signal[(signal >= first) & (signal < hi)]
+
+
 def select_targets(
     scores: np.ndarray,
     eligible: np.ndarray,
@@ -242,7 +295,7 @@ def run_backtest(
     if first >= hi:
         raise ValueError("not enough history in the requested range")
 
-    signal_days = np.arange(first, hi, params.rebalance, dtype="int64")
+    signal_days = signal_schedule(dates, first, hi, params)
     if not len(signal_days):
         raise ValueError("no rebalance dates in the requested range")
 
@@ -299,7 +352,8 @@ def run_backtest(
 
             equity_now = cash + float(shares @ last_price)
             if targets:
-                target_value = equity_now / len(targets)
+                slots = max(len(targets), params.max_m) if params.cap_weight else len(targets)
+                target_value = equity_now / slots
                 band = params.weight_band
                 upper, lower = target_value * (1 + band), target_value * (1 - band)
 

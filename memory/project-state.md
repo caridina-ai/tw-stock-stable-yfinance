@@ -9,15 +9,21 @@
 - 2026-10-15 以新資料（1,973 檔，至 2026-10-15）重跑全部結果並推上 `main`。
   耗時參考：fetch 約 15 分鐘（含證交所退避）、mine 2 分鐘、backtest 數秒、WFCV 400 trials 約 8 分鐘。
 
-## 進行中：FIAT-hyper-parameters（2026-10-16 開始）
+## FIAT-hyper-parameters（2026-10-16 完成，`main` 的 `d167148`）
 
-- 已推上 `main`（`67f1c4b`）：`StrategyParams` 新增 `rebalance_day`（每月第幾日**成交**，選股用前一交易日收盤）、
-  `holiday`（`next` 延後／`prev` 提前）、`cap_weight`（每檔上限 1/`max_m`，其餘留現金）；預設值＝舊行為。
-  `twstable sweep` 跑 28 日 × 2 假日規則 × 20 檔數 × 2 cap，兩種評估：
-  `wf`＝沿用 `wfcv.json` 各折自己的參數只覆寫這幾項、串接 OOS；`prod`＝上線版參數跑全期。輸出 `results/hyper/grid.csv`。
-- 待辦：跑 grid、寫 `sweep_report`（熱力圖、各日跨年一致性檢定、檔數臨界值）、README 新節、複製 FIAT 到 `genesis/`。
-- 判斷「某日較好」是不是運氣：用逐年報酬，對各年的日排名算 Kendall's W，
-  虛無分布用「每年各自隨機循環平移日序」（保留相鄰日相關）。
+- 引擎新參數（預設＝舊行為）：`rebalance_day`（每月第幾日**成交**，前一交易日收盤選股）、`holiday`（`next`／`prev`）、
+  `cap_weight`（每檔 ≤ 1/`max_m`，其餘現金）、`weighting`（`equal`／`score`）。
+- `twstable sweep`：9,122 組（28 日 × 2 假日 × 1–20 檔 × cap × weighting，加原間隔），4 核心 13 分 45 秒。
+  兩種評估：`wf`＝`wfcv.json` 各折參數只覆寫這幾項、串接 OOS；`prod`＝上線版參數 2001–2026。
+- **計算與輸出分開**：`results/hyper/grid.csv`（指標＋逐年報酬，`id`）＋`curves.parquet`（月底權益，長表）是原料；
+  `twstable sweep-report` 幾秒內重做圖、`summary.json`、`SUMMARY.md`、`recommended_params.json`。
+  下一個 FIAT（viewer）直接讀這兩個原料檔，不必重跑。
+- 結論：每月 24 日、假日延後、12 檔、cap 開、等權重（`recommended_params.json`，**`production_params.json` 未改**）。
+  換股日無跨年一致性（Kendall's W p 0.64／0.75）；假日規則差異是雜訊；wf 8 檔起高原、≤3 檔不能用；
+  cap 讓 wf 高原 Sharpe 1.07→1.16；分數權重沒用。prod 下建議設定略差（0.70 對 0.72），已在 SUMMARY 照實寫。
+- README 第四節有**寫死的數字**（24 日、12 檔、表格），重跑 sweep 後要對照 `SUMMARY.md` 更新。
+- 分數本身當崩盤退場訊號是落後的（2008-09 大盤 -44% 時仍 46 檔過門檻；≤10 檔的 12 個月之後大盤平均大漲），
+  寫在 README「未來可改進」第 3 項；分析腳本沒進 repo（用 `compute_scores` 對月底算過門檻檔數即可重現）。
 
 ## 已知結論
 

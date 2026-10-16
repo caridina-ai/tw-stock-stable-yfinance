@@ -48,7 +48,3 @@
 4. 若重抓過 `data/`，用 `uv run python ../sidecar/setup.py publish`：它在 `data/` commit、
    push 到 data repo，並改寫 `main` 的 `data.lock`；把 `data.lock` 跟新結果一起 commit 到 `main`。
    每次重抓 data repo 約多 350 MB，**要有理由才重抓**（見 `memory/data.md`）。
-
-## 進行中的工作
-
-FIAT-hyper-parameters（換股日 × 假日規則 × 持股檔數）進行中，狀態見 `memory/project-state.md`。

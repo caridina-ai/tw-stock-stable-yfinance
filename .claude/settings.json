@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch origin sidecar:*)",
+      "Bash(git worktree add -B sidecar ../sidecar origin/sidecar)",
+      "mcp__claude-code-remote__add_repo",
+      "Bash(python3 ../sidecar/setup.py)",
+      "Bash(python3 ../sidecar/setup.py:*)",
+      "Bash(uv run python ../sidecar/setup.py:*)"
+    ]
+  }
+}

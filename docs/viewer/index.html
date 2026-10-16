@@ -458,6 +458,7 @@
     log: true,
     px: new Map(),       // stock id -> decoded prices (or a pending Promise)
     list: [],            // current ranking rows
+    expToken: 0,         // latest experiment request
   };
 
   async function getJSON(path) {
@@ -1301,12 +1302,26 @@
   }
 
   async function setExperiment(id, keepDate = true) {
+    // the last choice wins even if an earlier, slower download lands after it
+    const token = ++S.expToken;
     const prevDay = S.exp ? S.days[S.exp.months[S.m].s] : null;
+    for (const b of $("exp-tabs").children) b.setAttribute("aria-selected", String(b.dataset.id === id));
     if (!S.exps[id]) {
       $("chart-status").textContent = "載入實驗資料中…";
-      S.exps[id] = prepare(await getJSON(`exp/${id}.json`));
+      S.exps[id] = getJSON(`exp/${id}.json`).then(prepare);
     }
-    S.exp = S.exps[id];
+    let exp;
+    try {
+      exp = await S.exps[id];
+    } catch (e) {
+      delete S.exps[id];
+      if (token === S.expToken) $("chart-status").textContent = `實驗資料載入失敗：${e.message}`;
+      return;
+    }
+    S.exps[id] = exp;
+    if (token !== S.expToken) return;
+    $("chart-status").textContent = "";
+    S.exp = exp;
     // keep the date: nearest rebalance in the new experiment
     if (keepDate && prevDay !== null) {
       let best = 0, bd = Infinity;
@@ -1317,7 +1332,6 @@
       S.m = best;
     }
     S.m = Math.min(S.m, S.exp.months.length - 1);
-    for (const b of $("exp-tabs").children) b.setAttribute("aria-selected", String(b.dataset.id === id));
     const rows = buildList(S.exp, S.m);
     if (!S.sid || !S.exp.uIndex.has(S.sid)) S.sid = S.exp.union[rows[0]];
     update();

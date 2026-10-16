@@ -3,6 +3,7 @@
 ## 已完成
 
 - FIATLUX（`main` 的 `genesis/FIATLUX.md`）：挖掘、波段 viewer、策略、回測、回測 viewer、WFCV、HTML 報告。
+- FIAT-hyper-parameters、FIAT-http-viewer：見下兩節。
 - FIAT-adjusted-price：檢查後發現**本來就用還原股價**，所以沒把該需求檔加進 `main`；
   只把還原步驟改成明確的（快取存原始價 + `Adj Close`，`data.adjust()` 還原），
   並把成交金額改用原始收盤價 × 股數。
@@ -30,6 +31,26 @@
   重跑 `wfcv_monthly` 後全部要核對。
 - 分數本身當崩盤退場訊號是落後的（2008-09 大盤 -44% 時仍 46 檔過門檻；≤10 檔的 12 個月之後大盤平均大漲），
   寫在 README「未來可改進」第 3 項；分析腳本沒進 repo（用 `compute_scores` 對月底算過門檻檔數即可重現）。
+
+## FIAT-http-viewer（2026-10-16 完成，`main` 的 `d1e6ec3`）
+
+- 網址：<https://caridina-ai.github.io/tw-stock-stable-yfinance/viewer/>（Pages 早已開在 `main` 的 `/docs`，報告頂端有連結）。
+- 三段指令，計算與輸出分開：`twstable explore`（約 20 秒，重播 7 個實驗 → `results/explore/<id>/`：
+  `trace.json`、`scores.parquet`、`curve.parquet`、`positions.parquet`）→ `twstable stacked`（約 50 秒，`stacked.png`）
+  → `twstable viewer`（約 1 分鐘，`docs/viewer/`：`data/meta.json`、`data/exp/<id>.json`、`data/px/<代號>.json`）。
+  模板在 `src/twstable/templates/viewer.html`，build 時原樣複製；改頁面要改模板再跑 `viewer`（加 `--no-prices` 免重寫股價檔）。
+- 7 個實驗定義在 `explore.EXPERIMENTS`（id：prod、prod_nocap、prod_score、wf_d24、wfcv1、default20、prod_full），
+  都從既有結果檔重播，不重新搜尋；重播與結果檔逐點相同（有驗證）。新增實驗只要加一列再跑三段指令。
+- `portfolio.plan_decisions` 是從 `run_backtest` 拆出的前半段（訊號日、分數、合格），重播用它保證排名與引擎一致。
+- 股價存成 1/2000 對數刻度整數（差分），1,292 檔約 81 MB、壓縮 28 MB；瀏覽器重算的分數分項與正式值中位差 0.03%，
+  restraint 項最多差幾 %，所以排行榜與分數子圖一律用匯出的正式分數。
+- 疊加圖分層：「新股接手被汰除者那一層」（sweep）比使用者提的「最長的放最底」（firstfit）跳動少 21–41%，兩者都算取小的。
+- 設計決定（都寫進 CALLBACK）：分數放在共用 X 軸的子圖、不疊第二 Y 軸；排行榜＝前 50 名合格＋續抱＋本次剔除；
+  顏色以「月」計（依日期差 /30.44），所以每 10–60 交易日換股的實驗也適用。
+- **踩過的坑**：`.gitignore` 原本的 `data/` 會連 `docs/viewer/data/` 一起忽略，已改成 `/data/`。
+- README 第六節的實驗表有**寫死的數字**（7 列 CAGR／Sharpe／MDD，與 21–41%），重跑 explore 後對照 `explore` 的輸出更新。
+- 測試在瀏覽器端：node 版 Playwright 在 `/opt/node-tools/node_modules/playwright`（Python 版沒裝）；
+  `python3 -m http.server -d docs 8765` 後用腳本按鍵、截圖即可（腳本沒進 repo）。
 
 ## 已知結論
 

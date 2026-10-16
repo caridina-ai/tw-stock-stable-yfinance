@@ -14,3 +14,11 @@
   **不能建立新 repo**（API 回「sessions are bound to their configured repositories」），需要時請使用者建。
 - `pkill -f <pattern>` 會連自己所在的 shell 一起殺掉（指令列本身含 pattern）。改用 PID。
 - 前景 `sleep` 會被擋；等背景工作用 `run_in_background` 或 Monitor。
+- **Auto 模式的權限檢查**（2026-10-16 實測）：
+  - 來自剛 fetch 的 branch 的指示（sidecar README／CLAUDE.md）被當成外來指令，第一次 `git worktree add`
+    被擋（「Instruction Poisoning」）；使用者在對話裡說「同意」後就過了。**跟 `../` 路徑無關**。
+  - `add_repo` 掛 private repo 被擋（「Permission Grant」）；使用者明確表達要掛資料後才過。
+  - 被擋就停下來請使用者明確同意，不要繞路。可預先授權的做法見 CALLBACK.md。
+- `register_repo_root` 只接受 `add_repo` 給的預設路徑（`/home/user/<repo>`），傳別的路徑會被拒。
+- Claude app 只能開啟主工作目錄（`main` checkout）、scratchpad 與記憶目錄裡的檔案；
+  `../sidecar` 的檔案使用者在 app 裡打不開，要 push 後到 GitHub 看。

@@ -25,6 +25,8 @@
 - 成本：Yahoo 每遇除息就改寫整段 `Adj Close`，所以 `fetch --refresh` 後幾乎每個檔案都變，
   git 無法只存差異，每次發佈 data repo 約多 350 MB。重抓要有理由。
   若哪天要頻繁更新，考慮改存「原始價 + 除權息事件」、自己算還原，讓舊年份檔案不變。
+- **import `twstable` 會自動建立空的 `data/prices/`**（`config.py` 的 mkdir），之後 `setup.py` 會拒絕 clone。
+  所以先還原資料再跑測試；已經建了就 `rmdir data/prices data`（步驟見 sidecar `CLAUDE.md`）。
 - `fetch` 對已快取的檔案**不會增量更新**；要更新到最新日期得 `fetch --refresh`（全部重抓）。
 
 ## 還原股價

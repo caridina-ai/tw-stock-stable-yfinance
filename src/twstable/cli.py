@@ -155,8 +155,15 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def cmd_sweep(args: argparse.Namespace) -> int:
     from .sweep import run_sweep_cli
+    from .sweep_report import run_report_cli
 
-    return run_sweep_cli(args)
+    return run_sweep_cli(args) or run_report_cli(args)
+
+
+def cmd_sweep_report(args: argparse.Namespace) -> int:
+    from .sweep_report import run_report_cli
+
+    return run_report_cli(args)
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +239,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out-dir", help="output directory (default results/hyper)")
     s.add_argument("--workers", type=int, default=0, help="processes (default: all cores)")
     s.set_defaults(func=cmd_sweep)
+
+    sr = sub.add_parser("sweep-report", help="rebuild the sweep figures and SUMMARY.md from grid.csv")
+    sr.add_argument("--wfcv", help="WFCV result holding the production parameters")
+    sr.add_argument("--out-dir", help="sweep directory (default results/hyper)")
+    sr.set_defaults(func=cmd_sweep_report)
 
     return p
 

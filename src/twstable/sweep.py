@@ -225,7 +225,7 @@ def run_sweep_cli(args) -> int:
     workers = args.workers or os.cpu_count() or 1
     print(f"{len(tasks)} configurations on {workers} workers")
     grid, curves = run_grid(setup, tasks, workers)
-    grid.to_csv(csv, index=False)
-    curves.to_parquet(out_dir / CURVES_PARQUET, index=False)
+    grid.to_csv(csv, index=False, float_format="%.6g")
+    curves.to_parquet(out_dir / CURVES_PARQUET, index=False, compression="zstd")
     print(f"grid written to {csv}, curves to {out_dir / CURVES_PARQUET}")
     return 0

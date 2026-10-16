@@ -5,8 +5,8 @@ once a month on a fixed calendar day, which day -- and when that day is a
 holiday, trade before or after it?  And how few names can the book hold before
 the strategy stops working?
 
-Every configuration is a ``(rebalance_day, holiday, max_m, cap_weight)`` override
-on top of parameters that were chosen without it, scored two ways:
+Every configuration is a ``(rebalance_day, holiday, max_m, cap_weight, weighting)``
+override on top of parameters that were chosen without it, scored two ways:
 
 walk-forward (``wf``)
     Each fold of ``results/wfcv.json`` keeps the parameters its own training
@@ -20,6 +20,12 @@ production (``prod``)
 Rows with ``rebalance_day == 0`` keep the original trading-day interval, and
 ``max_m == 0`` keeps the original book size: the reference the monthly
 schedules are compared with.
+
+Computing and presenting are separate on purpose.  ``twstable sweep`` writes
+``grid.csv`` (one row of metrics and calendar-year returns per configuration)
+and ``curves.parquet`` (month-end equity of every configuration, keyed by the
+same ``id``); everything shown to a person is built from those two files, so a
+new viewer or report never needs the grid re-run.
 """
 
 from __future__ import annotations
@@ -42,24 +48,27 @@ from .wfcv import chain_equity
 
 DEFAULT_DIR = RESULTS_DIR / "hyper"
 GRID_CSV = "grid.csv"
+CURVES_PARQUET = "curves.parquet"
 
 DAYS = tuple(range(1, 29))
 HOLIDAYS = ("next", "prev")
 SIZES = tuple(range(1, 21))
 CAPS = (False, True)
+WEIGHTINGS = ("equal", "score")
 PROTOCOLS = ("wf", "prod")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class Task:
     protocol: str
     day: int  # 0 = keep the trading-day interval
     holiday: str
     max_m: int  # 0 = keep the configured size
     cap: bool
+    weighting: str = "equal"
 
     def apply(self, params: StrategyParams) -> StrategyParams:
-        over: dict = {"cap_weight": self.cap}
+        over: dict = {"cap_weight": self.cap, "weighting": self.weighting}
         if self.day:
             over.update(rebalance_day=self.day, holiday=self.holiday)
         if self.max_m:
@@ -72,11 +81,12 @@ def build_tasks() -> list[Task]:
     for protocol in PROTOCOLS:
         tasks.append(Task(protocol, 0, "next", 0, False))
         for cap in CAPS:
-            for m in SIZES:
-                tasks.append(Task(protocol, 0, "next", m, cap))
-                for day in DAYS:
-                    for holiday in HOLIDAYS:
-                        tasks.append(Task(protocol, day, holiday, m, cap))
+            for w in WEIGHTINGS:
+                for m in SIZES:
+                    tasks.append(Task(protocol, 0, "next", m, cap, w))
+                    for day in DAYS:
+                        for holiday in HOLIDAYS:
+                            tasks.append(Task(protocol, day, holiday, m, cap, w))
     return tasks
 
 
@@ -113,7 +123,8 @@ def yearly_returns(equity: pd.Series) -> pd.Series:
     return out
 
 
-def evaluate(setup: Setup, task: Task) -> dict:
+def evaluate(setup: Setup, task: Task) -> tuple[dict, pd.Series]:
+    """Metrics row and month-end equity curve of one configuration."""
     if task.protocol == "wf":
         runs = [
             run_backtest(setup.market, task.apply(p), start=s, end=e, record=True)
@@ -123,7 +134,8 @@ def evaluate(setup: Setup, task: Task) -> dict:
     else:
         runs = [run_backtest(setup.market, task.apply(setup.production), record=True)]
         equity = runs[0].equity
-    return summarise(task, equity, runs)
+    month_end = equity.resample("ME").last().dropna()
+    return summarise(task, equity, runs), month_end
 
 
 def summarise(task: Task, equity: pd.Series, runs: list[BacktestResult]) -> dict:
@@ -135,6 +147,7 @@ def summarise(task: Task, equity: pd.Series, runs: list[BacktestResult]) -> dict
         "holiday": task.holiday,
         "max_m": task.max_m,
         "cap": task.cap,
+        "weighting": task.weighting,
         "start": m.start,
         "end": m.end,
         "cagr": m.cagr,
@@ -164,27 +177,39 @@ def _init(setup: Setup) -> None:
     _SETUP = setup
 
 
-def _work(task: Task) -> dict:
+def _work(task: Task) -> tuple[dict, pd.Series]:
     assert _SETUP is not None
     return evaluate(_SETUP, task)
 
 
-def run_grid(setup: Setup, tasks: list[Task], workers: int) -> pd.DataFrame:
+def run_grid(
+    setup: Setup, tasks: list[Task], workers: int
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Evaluate every task, each worker process holding its own copy of the market.
+
+    Returns ``(grid, curves)``: one metrics row per task, and the month-end
+    equity of every task in long form (``id``, ``date``, ``equity``).  Tasks are
+    sorted first, so ``id`` is the row number and stable across re-runs.
 
     ``forkserver`` rather than ``fork``: the parent runs numpy/pyarrow thread
     pools, and forking a multi-threaded process can deadlock the children.
     """
+    tasks = sorted(tasks)
     if workers <= 1:
-        rows = [evaluate(setup, t) for t in tqdm(tasks, unit="cfg")]
+        out = [evaluate(setup, t) for t in tqdm(tasks, unit="cfg")]
     else:
         ctx = mp.get_context("forkserver")
         with ctx.Pool(workers, initializer=_init, initargs=(setup,)) as pool:
-            it = pool.imap_unordered(_work, tasks, chunksize=4)
-            rows = list(tqdm(it, total=len(tasks), unit="cfg"))
-    df = pd.DataFrame(rows)
-    keys = ["protocol", "day", "holiday", "max_m", "cap"]
-    return df.sort_values(keys).reset_index(drop=True)
+            out = list(tqdm(pool.imap(_work, tasks, chunksize=4), total=len(tasks), unit="cfg"))
+
+    grid = pd.DataFrame([row for row, _ in out])
+    grid.insert(0, "id", np.arange(len(grid), dtype="int32"))
+    curves = pd.concat(
+        [pd.DataFrame({"id": np.int32(k), "date": c.index, "equity": c.to_numpy("float32")})
+         for k, (_, c) in enumerate(out)],
+        ignore_index=True,
+    )
+    return grid, curves
 
 
 def run_sweep_cli(args) -> int:
@@ -199,7 +224,8 @@ def run_sweep_cli(args) -> int:
     tasks = build_tasks()
     workers = args.workers or os.cpu_count() or 1
     print(f"{len(tasks)} configurations on {workers} workers")
-    df = run_grid(setup, tasks, workers)
-    df.to_csv(csv, index=False)
-    print(f"grid written to {csv}")
+    grid, curves = run_grid(setup, tasks, workers)
+    grid.to_csv(csv, index=False)
+    curves.to_parquet(out_dir / CURVES_PARQUET, index=False)
+    print(f"grid written to {csv}, curves to {out_dir / CURVES_PARQUET}")
     return 0

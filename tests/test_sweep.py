@@ -27,19 +27,21 @@ def test_grid_covers_every_combination() -> None:
     tasks = build_tasks()
     assert len(tasks) == len(set(tasks))
     wf = [t for t in tasks if t.protocol == "wf" and t.day]
-    assert len(wf) == 28 * 2 * 20 * 2
+    assert len(wf) == 28 * 2 * 20 * 2 * 2
 
 
 def test_reference_row_reproduces_the_walk_forward_curve(setup: Setup) -> None:
-    row = evaluate(setup, Task("wf", 0, "next", 0, False))
+    row, curve = evaluate(setup, Task("wf", 0, "next", 0, False))
     runs = [run_backtest(setup.market, p, start=s, end=e) for s, e, p in setup.folds]
     eq = chain_equity([r.equity for r in runs])
     assert row["cagr"] == pytest.approx((eq.iloc[-1] / eq.iloc[0]) ** (
         365.25 / (eq.index[-1] - eq.index[0]).days) - 1)
+    assert curve.iloc[-1] / curve.iloc[0] == pytest.approx(
+        eq.resample("ME").last().iloc[-1] / eq.resample("ME").last().iloc[0])
 
 
 def test_overrides_reach_every_fold(setup: Setup) -> None:
-    row = evaluate(setup, Task("wf", 11, "prev", 3, False))
+    row, _ = evaluate(setup, Task("wf", 11, "prev", 3, False, "score"))
     assert row["avg_held"] <= 3
     # ~25 months of tests -> about one rebalance a month
     months = sum((e - s).days for s, e, _ in setup.folds) / 30.44
@@ -55,8 +57,13 @@ def test_yearly_returns_compound_to_the_total() -> None:
 
 
 def test_parallel_grid_matches_serial(setup: Setup) -> None:
-    tasks = [Task("prod", d, h, m, c) for d in (3, 17) for h in ("next", "prev")
-             for m in (2, 6) for c in (False, True)]
-    serial = run_grid(setup, tasks, workers=1)
-    parallel = run_grid(setup, tasks, workers=2)
-    pd.testing.assert_frame_equal(serial, parallel)
+    tasks = [Task("prod", d, h, m, c, w) for d in (17, 3) for h in ("next", "prev")
+             for m in (2, 6) for c in (False, True) for w in ("equal", "score")]
+    grid, curves = run_grid(setup, tasks, workers=1)
+    pgrid, pcurves = run_grid(setup, tasks, workers=2)
+    pd.testing.assert_frame_equal(grid, pgrid)
+    pd.testing.assert_frame_equal(curves, pcurves)
+    # ids are row numbers of the sorted grid and key the curves
+    assert list(grid["id"]) == list(range(len(tasks)))
+    assert grid["day"].is_monotonic_increasing
+    assert set(curves["id"]) == set(grid["id"])

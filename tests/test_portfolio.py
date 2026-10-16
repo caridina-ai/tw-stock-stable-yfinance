@@ -9,7 +9,13 @@ import pytest
 from twstable.config import FEE_RATE, SELL_TAX_RATE
 from twstable.data import Panel
 from twstable.metrics import cagr, compute_metrics, drawdown, max_drawdown
-from twstable.portfolio import StrategyParams, run_backtest, select_targets, signal_schedule
+from twstable.portfolio import (
+    StrategyParams,
+    run_backtest,
+    select_targets,
+    signal_schedule,
+    target_values,
+)
 from twstable.score import ScoreParams
 
 
@@ -252,6 +258,33 @@ def test_cap_weight_keeps_cash_when_too_few_names_qualify() -> None:
     stock_ret = stock.loc[capped.equity.index[-1]] / stock.loc[capped.equity.index[0]] - 1
     capped_ret = capped.equity.iloc[-1] / capped.equity.iloc[0] - 1
     assert 0 < capped_ret < 0.5 * stock_ret
+
+
+def test_score_weighting_follows_the_scores() -> None:
+    scores = np.array([0.6, 0.3, 0.1, 0.9])
+    p = StrategyParams(max_m=3, weighting="score")
+    tv = target_values(1000.0, [0, 1, 2], scores, p)
+    assert tv[0] == pytest.approx(600.0) and tv[2] == pytest.approx(100.0)
+    eq = target_values(1000.0, [0, 1, 2], scores, p.replace(weighting="equal"))
+    assert list(eq.values()) == pytest.approx([1000.0 / 3] * 3)
+    # capped: two names of max_m=4 invest half the book, still split by score
+    capped = target_values(1000.0, [0, 1], scores, p.replace(max_m=4, cap_weight=True))
+    assert sum(capped.values()) == pytest.approx(500.0)
+    assert capped[0] == pytest.approx(2 * capped[1])
+    with pytest.raises(ValueError):
+        target_values(1000.0, [0], scores, p.replace(weighting="inverse_vol"))
+
+
+def test_score_weighting_runs_end_to_end() -> None:
+    rng = np.random.default_rng(11)
+    n = 1200
+    prices = {f"{i:04d}": 50 * np.cumprod(1 + rng.normal(0.0006, 0.015, n)) for i in range(8)}
+    panel = make_panel(prices, n)
+    p = StrategyParams(max_m=4, min_score=0.0, min_dollar_volume=0.0, weighting="score")
+    res = run_backtest(panel, p, initial_capital=1e6)
+    weights = [[h["weight"] for h in rb.holdings] for rb in res.rebalances if len(rb.holdings) > 1]
+    assert any(max(w) - min(w) > 0.05 for w in weights), "score weights should differ"
+    assert (res.equity > 0).all()
 
 
 def test_monthly_backtest_trades_once_a_month() -> None:

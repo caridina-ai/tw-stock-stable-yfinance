@@ -92,6 +92,15 @@ class StrategyParams:
     which the 2008 fold of the walk-forward run did for four rebalances in a row.
     """
 
+    weighting: str = "equal"
+    """How the invested part of the book is split over the holdings.
+
+    ``"equal"`` gives every name the same share, so an unchanged selection
+    trades nothing.  ``"score"`` makes each share proportional to the name's
+    score, so a holding whose score fades is trimmed gradually instead of being
+    held at full size until the hysteresis band finally drops it.
+    """
+
     def replace(self, **kw: Any) -> StrategyParams:
         return replace(self, **kw)
 
@@ -264,6 +273,21 @@ def select_targets(
     return chosen
 
 
+def target_values(
+    equity: float, targets: list[int], scores: np.ndarray, params: StrategyParams
+) -> dict[int, float]:
+    """Money each selected name should hold after this rebalance."""
+    slots = max(len(targets), params.max_m) if params.cap_weight else len(targets)
+    if params.weighting == "equal":
+        return {i: equity / slots for i in targets}
+    if params.weighting != "score":
+        raise ValueError(f"weighting must be 'equal' or 'score', got {params.weighting!r}")
+    s = np.array([max(float(scores[i]), 0.0) for i in targets])
+    share = s / s.sum() if s.sum() > 0 else np.full(len(targets), 1.0 / len(targets))
+    invested = equity * len(targets) / slots
+    return {i: invested * float(w) for i, w in zip(targets, share, strict=True)}
+
+
 def run_backtest(
     market: Market | Panel,
     params: StrategyParams,
@@ -334,7 +358,7 @@ def run_backtest(
             equity_before = cash + float(shares @ last_price)
             targets = select_targets(scores, eligible, held, params)
 
-            # value everything, then rebuild equal-weighted
+            # value everything, then rebuild to the target weights
             target_set = set(targets)
             sold_ids, bought_ids = [], []
             traded_value = 0.0
@@ -352,30 +376,28 @@ def run_backtest(
 
             equity_now = cash + float(shares @ last_price)
             if targets:
-                slots = max(len(targets), params.max_m) if params.cap_weight else len(targets)
-                target_value = equity_now / slots
+                target_value = target_values(equity_now, targets, scores, params)
                 band = params.weight_band
-                upper, lower = target_value * (1 + band), target_value * (1 - band)
 
                 # trim overweights first so the cash is available for top-ups
                 for i in targets:
                     cur = shares[i] * last_price[i]
-                    if cur > upper and last_price[i] > 0:
-                        delta = cur - target_value
+                    if cur > target_value[i] * (1 + band) and last_price[i] > 0:
+                        delta = cur - target_value[i]
                         cost = delta * (FEE_RATE + SELL_TAX_RATE)
                         cash += delta - cost
                         cost_paid += cost
                         traded_value += delta
                         n_trades += 1
-                        shares[i] = target_value / last_price[i]
+                        shares[i] = target_value[i] / last_price[i]
 
                 # top up anything below the band; brand-new names are at 0 and
                 # therefore always bought
                 for i in targets:
                     cur = shares[i] * last_price[i]
-                    if cur >= lower or last_price[i] <= 0:
+                    if cur >= target_value[i] * (1 - band) or last_price[i] <= 0:
                         continue
-                    delta = min(target_value - cur, cash / (1 + FEE_RATE))
+                    delta = min(target_value[i] - cur, cash / (1 + FEE_RATE))
                     if delta <= 0:
                         continue
                     cost = delta * FEE_RATE

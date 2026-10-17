@@ -308,6 +308,7 @@
   .help dl { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 13px; }
   .help dt { text-align: right; }
   .help p { font-size: 13px; color: var(--ink-2); margin: 8px 0; }
+  .help .tap { color: var(--muted); }
 
   @media (max-width: 900px) {
     .app { height: auto; }
@@ -325,14 +326,18 @@
     .mini-wrap { height: 110px; }
     .keys { display: none; }
     .pad {
-      display: flex; gap: 5px; padding: 6px 12px; justify-content: center;
+      display: flex; gap: 4px; padding: 6px 8px; justify-content: center;
       position: sticky; bottom: 0; background: var(--surface);
       border-top: 1px solid var(--hairline);
     }
     .pad button {
-      min-width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--hairline);
+      min-width: 38px; height: 40px; border-radius: 8px; border: 1px solid var(--hairline);
       background: var(--plane); cursor: pointer; padding: 0 6px;
     }
+    .pad button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+    .pad button.sep { margin-left: 6px; font-size: 13px; }
+    /* the button row carries zoom and log on phones */
+    #zoom-chip, #log-chip { display: none; }
   }
 </style>
 </head>
@@ -387,10 +392,11 @@
     <button data-key="Home" aria-label="第一次換股">«</button>
     <button data-key="ArrowLeft" aria-label="上一次換股">◀</button>
     <button data-key="ArrowUp" aria-label="上一檔">▲</button>
-    <button data-key="Enter" aria-label="放大或還原">⤢</button>
+    <button data-key="Enter" id="pad-zoom" aria-label="放大或還原" aria-pressed="false">⤢</button>
     <button data-key="ArrowDown" aria-label="下一檔">▼</button>
     <button data-key="ArrowRight" aria-label="下一次換股">▶</button>
     <button data-key="End" aria-label="最後一次換股">»</button>
+    <button data-key="l" id="pad-log" class="sep" aria-label="股價 Y 軸對數或線性" aria-pressed="true">log</button>
   </div>
 </div>
 
@@ -398,13 +404,14 @@
   <div class="card" role="dialog" aria-label="操作說明">
     <h2>操作說明</h2>
     <dl>
-      <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>上一次／下一次換股</dd>
-      <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>排行榜上一檔／下一檔（<kbd>PgUp</kbd> <kbd>PgDn</kbd> 跳 10 檔）</dd>
-      <dt><kbd>Enter</kbd></dt><dd>放大到「回推範圍起點 → 下一次換股」，再按一次回到全範圍</dd>
-      <dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>第一次／最後一次換股</dd>
-      <dt><kbd>1</kbd>–<kbd>7</kbd></dt><dd>切換實驗</dd>
-      <dt><kbd>L</kbd></dt><dd>股價 Y 軸切換對數／線性</dd>
-      <dt><kbd>?</kbd> <kbd>Esc</kbd></dt><dd>開關本說明</dd>
+      <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>上一次／下一次換股<span class="tap">（按鈕 ◀ ▶）</span></dd>
+      <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>排行榜上一檔／下一檔<span class="tap">（按鈕 ▲ ▼，或直接點排行榜的列）</span>；
+        <kbd>PgUp</kbd> <kbd>PgDn</kbd> 跳 10 檔<span class="tap">（捲動排行榜再點）</span></dd>
+      <dt><kbd>Enter</kbd></dt><dd>放大到「回推範圍起點 → 下一次換股」，再按一次回到全範圍<span class="tap">（按鈕 ⤢）</span></dd>
+      <dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>第一次／最後一次換股<span class="tap">（按鈕 « »）</span></dd>
+      <dt><kbd>1</kbd>–<kbd>7</kbd></dt><dd>切換實驗<span class="tap">（點上方標籤）</span></dd>
+      <dt><kbd>L</kbd></dt><dd>股價 Y 軸切換對數／線性<span class="tap">（按鈕 log，反白＝對數）</span></dd>
+      <dt><kbd>?</kbd> <kbd>Esc</kbd></dt><dd>開關本說明<span class="tap">（右上 ? 按鈕；點說明外面關閉）</span></dd>
     </dl>
     <p><b>排行榜</b>：每次換股時，通過流動性與股價門檻的股票依分數排序的前 50 名，
       再加上不在前 50 名但仍持有（遲滯規則）或剛被剔除的股票。
@@ -1274,6 +1281,8 @@
     if (all || what.mini || what.month) renderMini();
     if (all || what.head || what.list) renderStockHead();
     if (all || what.chart || what.list) { renderChart(); renderScoreInfo(); }
+    $("pad-zoom").setAttribute("aria-pressed", String(S.zoom));
+    $("pad-log").setAttribute("aria-pressed", String(S.log));
     writeHash();
     ensurePrices();
   }

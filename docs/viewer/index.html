@@ -221,7 +221,7 @@
   .pnl b { font-weight: 650; margin-left: 2px; }
   .pnl b.gain { color: var(--gain); }
   .pnl b.loss { color: var(--loss); }
-  .row.pinned { border-bottom: 1px dashed var(--axis); margin-bottom: 4px; }
+  .row.pinned .st { color: var(--muted); }
   .divider {
     font-size: 10.5px; color: var(--muted); padding: 4px 10px 2px 44px;
     display: flex; align-items: center; gap: 8px;
@@ -586,7 +586,9 @@
     return { held: false, dropped: false };
   }
 
-  function buildList(exp, m) {
+  // ``extra``: a name to list even if it would not be (the one being viewed);
+  // it takes its place by rank like every other row
+  function buildList(exp, m, extra) {
     const rows = [];
     const prev = m > 0 ? exp.heldSet[m - 1] : new Set();
     for (let u = 0; u < exp.union.length; u++) {
@@ -594,7 +596,7 @@
       const listed = r >= 0 && r < TOP;
       const held = exp.heldSet[m].has(u);
       const justDropped = !held && prev.has(u);
-      if (listed || held || justDropped) rows.push(u);
+      if (listed || held || justDropped || u === extra) rows.push(u);
     }
     rows.sort((a, b) => {
       const ra = exp.rank[a][m], rb = exp.rank[b][m];
@@ -704,7 +706,7 @@
     const tail = x
       ? `<span class="pnl num" title="${esc(x.title)}">${x.html}</span>`
       : `<span class="wt num">${w > 0 ? (w * 100).toFixed(1) + "%" : ""}</span>
-      <span class="st">${statusText(st)}</span>`;
+      <span class="st">${statusText(st) || (extraClass === "pinned" ? "未上榜" : "")}</span>`;
     return `<div class="${cls}" data-sid="${sid}" role="option" aria-selected="${sid === S.sid}"
       style="--tint:${rowTint(st)};--swatch:${rowTint(st, 1)}" title="${esc(info[0])} ${sid}${info[2] ? "・" + esc(info[2]) : ""}">
       <span class="rk num">${r >= 0 ? r + 1 : "–"}</span>
@@ -717,26 +719,28 @@
 
   function renderList() {
     const exp = S.exp, m = S.m;
-    const rows = buildList(exp, m);
+    const u0 = exp.uIndex.get(S.sid);
+    const natural = new Set(buildList(exp, m));
+    const rows = buildList(exp, m, u0);
     S.list = rows.map((u) => exp.union[u]);
     const minScore = exp.segments[exp.months[m].g].params.min_score;
     let html = "";
-    const u0 = exp.uIndex.get(S.sid);
-    if (u0 !== undefined && !rows.includes(u0)) {
-      html += `<div class="divider">目前檢視（本次不在榜上）</div>` + rowHTML(exp, u0, m, "pinned");
-    }
-    let crossed = false, ineligible = false;
+    let crossed = false, outside = false, ineligible = false;
     for (const u of rows) {
       const r = exp.rank[u][m];
       if (!crossed && r >= 0 && exp.score[u][m] / 1000 < minScore) {
         html += `<div class="divider">買進門檻 ${minScore.toFixed(3)}（以下只能續抱）</div>`;
         crossed = true;
       }
+      if (!outside && r >= TOP) {
+        html += `<div class="divider">前 ${TOP} 名以外</div>`;
+        outside = true;
+      }
       if (!ineligible && r < 0) {
         html += `<div class="divider">不符流動性／股價門檻</div>`;
         ineligible = true;
       }
-      html += rowHTML(exp, u, m);
+      html += rowHTML(exp, u, m, natural.has(u) ? "" : "pinned");
     }
     const el = $("rank-list");
     el.innerHTML = html;

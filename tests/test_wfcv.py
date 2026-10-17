@@ -164,3 +164,37 @@ def test_pinned_parameters_leave_the_rest_of_the_search_unchanged() -> None:
     rng = np.random.default_rng(5)
     drawn = [sample_params(rng).replace(**fixed) for _ in range(6)]
     assert best in drawn
+
+
+def test_schedule_search_draws_its_own_stream() -> None:
+    from twstable.wfcv import Fold, sample_params, sample_schedule, search_fold
+
+    market = prepare_market(make_panel(n_days=1500, seed=2))
+    d = market.dates
+    fold = Fold(1, d[0], d[1000], d[1000], d[1400])
+    best, _, _ = search_fold(market, fold, 8, np.random.default_rng(5), progress=False,
+                             schedule_rng=np.random.default_rng(9))
+    assert 1 <= best.rebalance_day <= 28 and 1 <= best.max_m <= 20
+
+    # the score side of every candidate is still the unscheduled draw with this seed
+    rng, sched = np.random.default_rng(5), np.random.default_rng(9)
+    drawn = [sample_params(rng).replace(**sample_schedule(sched)) for _ in range(8)]
+    assert best in drawn
+    sched = np.random.default_rng(9)
+    seen = [sample_schedule(sched) for _ in range(400)]
+    assert {s["max_m"] for s in seen} == set(range(1, 21))
+    assert {s["rebalance_day"] for s in seen} == set(range(1, 29))
+    assert {s["cap_weight"] for s in seen} == {True, False}
+    assert {s["holiday"] for s in seen} == {"next", "prev"}
+    assert {s["weighting"] for s in seen} == {"equal", "score"}
+
+
+def test_a_one_name_book_runs() -> None:
+    market = prepare_market(make_panel(n_days=1200, seed=4))
+    for cap in (False, True):
+        for w in ("equal", "score"):
+            p = StrategyParams(score=ScoreParams(window=200), max_m=1, rebalance_day=3,
+                               min_score=0.0, min_dollar_volume=0.0, cap_weight=cap, weighting=w)
+            res = run_backtest(market, p, start=market.dates[300])
+            assert res.n_rebalances > 10
+            assert all(len(rb.holdings) <= 1 for rb in res.rebalances)

@@ -74,6 +74,23 @@ def sample_params(rng: np.random.Generator) -> StrategyParams:
     )
 
 
+def sample_schedule(rng: np.random.Generator) -> dict:
+    """Draw the monthly settings of ``genesis/FIAT-hyper-parameters.md``.
+
+    Trade day 1-28, holiday rule, book size 1-20 (the range that FIAT asked to
+    explore), weight cap on / off and equal / score weighting.  Searching these
+    inside every fold, instead of pinning values read off a full-history sweep,
+    keeps them out-of-sample like everything else.
+    """
+    return {
+        "rebalance_day": int(rng.integers(1, 29)),
+        "holiday": str(rng.choice(["next", "prev"])),
+        "max_m": int(rng.integers(1, 21)),
+        "cap_weight": bool(rng.integers(0, 2)),
+        "weighting": str(rng.choice(["equal", "score"])),
+    }
+
+
 def objective(res: BacktestResult) -> float:
     """In-sample selection criterion.
 
@@ -173,6 +190,7 @@ def search_fold(
     rng: np.random.Generator,
     progress: bool = True,
     fixed: dict | None = None,
+    schedule_rng: np.random.Generator | None = None,
 ) -> tuple[StrategyParams, float, BacktestResult]:
     """Random-search the training slice; return the best configuration.
 
@@ -180,6 +198,10 @@ def search_fold(
     size) for every candidate.  They are applied after drawing, so the random
     stream -- and with it every other parameter of every candidate -- is the
     same as an unpinned search with the same seed.
+
+    ``schedule_rng`` makes every candidate also draw the monthly settings
+    (:func:`sample_schedule`).  They come from their own stream for the same
+    reason: the score parameters of every candidate stay those of ``rng``.
     """
     best_params: StrategyParams | None = None
     best_obj = -np.inf
@@ -191,6 +213,8 @@ def search_fold(
         it = tqdm(it, desc=f"fold {fold.index} search", unit="trial", leave=False)
     for _ in it:
         params = sample_params(rng)
+        if schedule_rng is not None:
+            params = params.replace(**sample_schedule(schedule_rng))
         if fixed:
             params = params.replace(**fixed)
         try:
@@ -267,6 +291,7 @@ def run_wfcv(
     trials: int,
     seed: int,
     fixed: dict | None = None,
+    search_schedule: bool = False,
 ) -> tuple[list[FoldResult], BacktestResult, StrategyParams]:
     folds = make_folds(market.dates, start, end, train_years, test_years)
     if not folds:
@@ -275,14 +300,19 @@ def run_wfcv(
     print(f"{len(folds)} walk-forward folds, {trials} trials each")
     if fixed:
         print(f"pinned for every candidate: {json.dumps(fixed)}")
+    if search_schedule:
+        print("every candidate also draws its trade day, holiday rule, book size, cap and weighting")
     for f in folds:
         print("  " + f.describe())
     print()
 
     rng = np.random.default_rng(seed)
+    sched = np.random.default_rng([seed, 1]) if search_schedule else None
     results: list[FoldResult] = []
     for fold in folds:
-        params, is_obj, is_res = search_fold(market, fold, trials, rng, fixed=fixed)
+        params, is_obj, is_res = search_fold(
+            market, fold, trials, rng, fixed=fixed, schedule_rng=sched
+        )
         oos = run_backtest(
             market, params, start=fold.test_start, end=fold.test_end, record=True
         )
@@ -322,7 +352,9 @@ def run_wfcv(
     )
     print("\nre-fitting production parameters on the most recent training window")
     print("  " + f"{prod_fold.train_start.date()}..{prod_fold.train_end.date()}")
-    prod_params, _, _ = search_fold(market, prod_fold, trials, rng, fixed=fixed)
+    prod_params, _, _ = search_fold(
+        market, prod_fold, trials, rng, fixed=fixed, schedule_rng=sched
+    )
 
     return results, combined, prod_params
 
@@ -426,6 +458,7 @@ def run_wfcv_cli(args) -> int:
         trials=args.trials,
         seed=args.seed,
         fixed=fixed,
+        search_schedule=args.search_schedule,
     )
     print_wfcv_report(results, combined, prod)
 
@@ -437,6 +470,7 @@ def run_wfcv_cli(args) -> int:
         "trials": args.trials,
         "seed": args.seed,
         "fixed": fixed,
+        "search_schedule": args.search_schedule,
         "production_params": prod.to_dict(),
         "folds": [
             {

@@ -243,6 +243,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON file or inline JSON of parameters pinned for every candidate, "
         'e.g. \'{"rebalance_day": 24, "max_m": 12}\'',
     )
+    w.add_argument(
+        "--search-schedule",
+        action="store_true",
+        help="every candidate also draws its monthly trade day (1-28), holiday rule, "
+        "book size (1-20), weight cap and weighting",
+    )
     w.add_argument("--out", help="output JSON path")
     w.set_defaults(func=cmd_wfcv)
 

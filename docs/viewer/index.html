@@ -55,6 +55,8 @@
     --cursor:   #0b0b0b;
     --tip-bg:   rgba(252, 252, 251, 0.97);
     --row-alpha: 0.55;
+    --gain:     #a3221d;
+    --loss:     #0b5e27;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
@@ -76,6 +78,8 @@
       --cursor:   #ffffff;
       --tip-bg:   rgba(26, 26, 25, 0.97);
       --row-alpha: 0.40;
+      --gain:     #ff8f86;
+      --loss:     #6fdc96;
     }
   }
   :root[data-theme="dark"] {
@@ -97,6 +101,8 @@
     --cursor:   #ffffff;
     --tip-bg:   rgba(26, 26, 25, 0.97);
     --row-alpha: 0.40;
+    --gain:     #ff8f86;
+    --loss:     #6fdc96;
   }
 
   * { box-sizing: border-box; }
@@ -211,6 +217,10 @@
   .row .wt { font-size: 12px; }
   .row .st { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
   .row.held .name { font-weight: 650; }
+  .row .pnl { grid-column: 5 / 7; text-align: right; white-space: nowrap; font-size: 11.5px; color: var(--ink-2); }
+  .pnl b { font-weight: 650; margin-left: 2px; }
+  .pnl b.gain { color: var(--gain); }
+  .pnl b.loss { color: var(--loss); }
   .row.pinned { border-bottom: 1px dashed var(--axis); margin-bottom: 4px; }
   .divider {
     font-size: 10.5px; color: var(--muted); padding: 4px 10px 2px 44px;
@@ -415,7 +425,9 @@
     </dl>
     <p><b>排行榜</b>：每次換股時，通過流動性與股價門檻的股票依分數排序的前 50 名，
       再加上不在前 50 名但仍持有（遲滯規則）或剛被剔除的股票。
-      成分股依「已經連續持有多久」由黃轉紅；被剔除的依「剔除多久了」由深綠漸淡（12 個月後不再上色）。</p>
+      成分股依「已經連續持有多久」由黃轉紅；被剔除的依「剔除多久了」由深綠漸淡（12 個月後不再上色）。
+      本次剔除的股票顯示「買進價→賣出價 報酬」：價格是買進與賣出那天的實際收盤價（未還原），
+      報酬用還原股價算、含期間股利，未扣交易成本（約 0.6%）；滑鼠停在上面可看日期與持有月數。</p>
     <p><b>K 線</b>：還原股價。藍色底色是當次選股用的回推範圍，藍線是該範圍的對數線性迴歸（延伸到整個畫面），
       虛線是 ±1σ；放大時橘色短線是「一致性」各子段各自的迴歸。圖下方色帶是這檔股票被持有的期間。
       下方子圖是這檔股票每次換股算出的分數，Y 軸範圍固定為本實驗所有曾上榜股票的分數範圍，方便比較；
@@ -535,6 +547,7 @@
     exp.since = Array.from({ length: nU }, () => new Int32Array(nM).fill(-1));
     exp.dropped = Array.from({ length: nU }, () => new Int32Array(nM).fill(-1));
     exp.heldSet = exp.months.map((mo) => new Set(mo.h.map(([u]) => u)));
+    exp.exits = exp.months.map((mo) => new Map((mo.x || []).map(([u, buy, sell, ret]) => [u, { buy, sell, ret }])));
     for (let u = 0; u < nU; u++) {
       let start = -1, drop = -1;
       for (let m = 0; m < nM; m++) {
@@ -652,6 +665,26 @@
     return "transparent";
   }
 
+  const fmtQuote = (p) => (p == null || !isFinite(p)) ? "–"
+    : String(+p.toFixed(p >= 1000 ? 0 : p >= 100 ? 1 : 2));
+
+  // the round trip a rebalance closed: buy -> sell price, return incl. dividends
+  function exitOf(exp, u, m) {
+    const x = exp.exits[m].get(u);
+    if (!x) return null;
+    const a = m > 0 ? exp.since[u][m - 1] : -1;
+    const buyDay = a >= 0 ? fmtDate(S.days[exp.months[a].t]) : "?";
+    const held = a >= 0 ? Math.round(monthsBetween(exp.months[a].t, exp.months[m].t)) : null;
+    const cls = x.ret >= 0 ? "gain" : "loss";
+    return {
+      // whole percent from 10% up keeps the cell inside the row on a phone
+      html: `${fmtQuote(x.buy)}→${fmtQuote(x.sell)}<b class="${cls}">${pct(x.ret, Math.abs(x.ret) >= 0.0995 ? 0 : 1)}</b>`,
+      title: `買 ${buyDay} ${fmtQuote(x.buy)} → 賣 ${fmtDate(S.days[exp.months[m].t])} ${fmtQuote(x.sell)}` +
+        `（實際收盤價，未還原）・含息報酬 ${pct(x.ret, 1)}（未扣手續費與證交稅約 0.6%）` +
+        (held !== null ? `・持有 ${held} 個月` : ""),
+    };
+  }
+
   function statusText(st) {
     if (st.held) return st.months < 0.5 ? "新進" : `持有 ${Math.round(st.months)} 月`;
     if (st.dropped) return st.months < 0.5 ? "本次剔除" : `${Math.round(st.months)} 月前剔除`;
@@ -667,14 +700,18 @@
     const st = statusOf(exp, u, m);
     const width = Math.round(46 * sc / exp.scoreMax);
     const cls = ["row", st.held ? "held" : "", sid === S.sid ? "sel" : "", extraClass].join(" ");
+    const x = exitOf(exp, u, m);
+    const tail = x
+      ? `<span class="pnl num" title="${esc(x.title)}">${x.html}</span>`
+      : `<span class="wt num">${w > 0 ? (w * 100).toFixed(1) + "%" : ""}</span>
+      <span class="st">${statusText(st)}</span>`;
     return `<div class="${cls}" data-sid="${sid}" role="option" aria-selected="${sid === S.sid}"
       style="--tint:${rowTint(st)};--swatch:${rowTint(st, 1)}" title="${esc(info[0])} ${sid}${info[2] ? "・" + esc(info[2]) : ""}">
       <span class="rk num">${r >= 0 ? r + 1 : "–"}</span>
       <span class="code num">${sid}</span>
       <span class="name">${esc(info[0])}</span>
       <span class="sc"><i style="width:${width}px"></i><b class="num">${sc.toFixed(3)}</b></span>
-      <span class="wt num">${w > 0 ? (w * 100).toFixed(1) + "%" : ""}</span>
-      <span class="st">${statusText(st)}</span>
+      ${tail}
     </div>`;
   }
 
@@ -1185,7 +1222,10 @@
         `<span>本次排名 <b class="num">${r >= 0 ? `#${r + 1}` : "不合格"}</b></span>` +
         `<span>分數 <b class="num">${sc.toFixed(3)}</b></span>` +
         `<span>權重 <b class="num">${w > 0 ? pctU(w, 1) : "–"}</b></span>` +
-        `<span>${statusText(st) || "未持有"}</span>` +
+        `<span>${statusText(st) || "未持有"}${(() => {
+          const x = exitOf(exp, u, m);
+          return x ? `　<span class="pnl num" title="${esc(x.title)}">${x.html}</span>` : "";
+        })()}</span>` +
         `<span>本實驗共持有 <b class="num">${nHeld}</b> 次</span>`;
     }
     $("stock-head").innerHTML =

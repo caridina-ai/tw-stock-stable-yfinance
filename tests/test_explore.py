@@ -211,6 +211,35 @@ def test_experiment_payload_shapes(market, trace, tmp_path) -> None:
     assert p["curve"]["d"] == sorted(p["curve"]["d"])
 
 
+def test_exits_are_the_round_trips_each_rebalance_closed(market, trace, tmp_path) -> None:
+    from twstable.viewer_build import exits
+
+    save_trace(trace, tmp_path)
+    saved = load_trace("wf", tmp_path)
+    cal = {d: i for i, d in enumerate(market.dates)}
+    adj = pd.DataFrame(market.close, columns=market.stock_ids).ffill()
+    raw = adj * 1.5  # stands in for unadjusted prices: must be passed through untouched
+    out = exits(saved, cal, lambda sid: (adj[sid].to_numpy(), raw[sid].to_numpy()))
+    assert len(out) == len(saved.months) and out[0] == []
+    n_closed = 0
+    for m, closed in enumerate(out[1:], start=1):
+        prev, now = set(saved.months[m - 1]["holdings"]), set(saved.months[m]["holdings"])
+        assert [c[0] for c in closed] == sorted(prev - now)
+        for sid, buy, sell, ret in closed:
+            a = m - 1
+            while a > 0 and sid in saved.months[a - 1]["holdings"]:
+                a -= 1
+            t0 = cal[pd.Timestamp(saved.months[a]["trade"])]
+            t1 = cal[pd.Timestamp(saved.months[m]["trade"])]
+            assert buy == pytest.approx(raw[sid].iloc[t0])
+            assert sell == pytest.approx(raw[sid].iloc[t1])
+            assert ret == pytest.approx(adj[sid].iloc[t1] / adj[sid].iloc[t0] - 1)
+            n_closed += 1
+    assert n_closed > 0
+    p = experiment_payload(saved, cal, lambda sid: (adj[sid].to_numpy(), raw[sid].to_numpy()))
+    assert sum(len(mo["x"]) for mo in p["months"]) == n_closed
+
+
 def test_viewer_page_is_self_contained() -> None:
     html = TEMPLATE.read_text("utf-8")
     assert "<script src" not in html and "<link" not in html

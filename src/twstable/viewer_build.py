@@ -9,7 +9,8 @@ pre-computed here, because GitHub Pages only serves files:
 ``data/exp/<id>.json``
     one experiment: its folds and parameters, metrics, a weekly equity curve,
     every rebalance, and for every name it ever listed the score and rank at
-    *every* rebalance plus the holdings and weights.
+    *every* rebalance plus the holdings and weights, and the round trips each
+    rebalance closed (buy and sell price, return).
 ``data/px/<stock>.json``
     daily adjusted (還原) OHLC of one stock, fetched when it is first shown.
 
@@ -29,6 +30,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -114,12 +116,64 @@ def _stock_ohlc(ticker: str, dates: pd.DatetimeIndex) -> np.ndarray | None:
     return bars[["Open", "High", "Low"]].reindex(dates).to_numpy(dtype="float64")
 
 
+def _raw_close(ticker: str, dates: pd.DatetimeIndex) -> np.ndarray | None:
+    """Unadjusted close on the calendar, carried over days without a bar."""
+    from .data import _path_for
+
+    path = _path_for(ticker)
+    if not path.exists():
+        return None
+    raw = pd.read_parquet(path, columns=["Close"])["Close"]
+    return raw.reindex(dates).ffill().to_numpy(dtype="float64")
+
+
 # ---------------------------------------------------------------------------
 # experiments
 # ---------------------------------------------------------------------------
 
 
-def experiment_payload(saved: SavedTrace, cal_index: dict[pd.Timestamp, int]) -> dict:
+def exits(saved: SavedTrace, cal_index: dict[pd.Timestamp, int],
+          prices: Callable[[str], tuple[np.ndarray, np.ndarray]]) -> list[list]:
+    """Round trips closed at each rebalance: ``[[(id, buy, sell, return), ...], ...]``.
+
+    A name held at rebalance ``m-1`` and not at ``m`` was bought at the trade
+    of the first rebalance of that run and sold at the trade of ``m``.
+    ``buy`` and ``sell`` are the raw (unadjusted) closes on those days -- the
+    prices one would actually have seen -- and ``return`` is the adjusted
+    (還原) ratio, so it includes the dividends in between.  Trims and top-ups
+    along the way and trading costs are left out: this is the stock's own
+    result over the stretch the strategy held it.
+
+    ``prices(id)`` gives ``(adjusted, raw)`` closes on the calendar.
+    """
+    months = saved.months
+    start: dict[str, int] = {}
+    out: list[list] = []
+    for m, month in enumerate(months):
+        now = set(month["holdings"])
+        closed = []
+        for sid in sorted(s for s in start if s not in now):
+            a = start.pop(sid)
+            adj, raw = prices(sid)
+            t0 = cal_index[pd.Timestamp(months[a]["trade"])]
+            t1 = cal_index[pd.Timestamp(month["trade"])]
+            closed.append((sid, float(raw[t0]), float(raw[t1]), float(adj[t1] / adj[t0] - 1)))
+        for sid in now:
+            start.setdefault(sid, m)
+        out.append(closed)
+    return out
+
+
+def _sig(x: float, digits: int = 4) -> float | None:
+    """Round to ``digits`` significant figures, the precision a quote is read at."""
+    return float(f"{x:.{digits}g}") if np.isfinite(x) else None
+
+
+def experiment_payload(
+    saved: SavedTrace,
+    cal_index: dict[pd.Timestamp, int],
+    prices: Callable[[str], tuple[np.ndarray, np.ndarray]] | None = None,
+) -> dict:
     meta = saved.meta
     union = saved.union
     months = saved.months
@@ -155,6 +209,8 @@ def experiment_payload(saved: SavedTrace, cal_index: dict[pd.Timestamp, int]) ->
     def rnd(x: float, n: int = 4) -> float:
         return round(float(x), n)
 
+    closed = exits(saved, cal_index, prices) if prices else [[] for _ in months]
+
     return {
         "id": meta["id"],
         "label": meta["label"],
@@ -183,8 +239,10 @@ def experiment_payload(saved: SavedTrace, cal_index: dict[pd.Timestamp, int]) ->
                 "to": rnd(m["turnover"], 3),
                 "h": [[pos[sid], round(w * 10000)] for sid, w in
                       sorted(m["holdings"].items(), key=lambda kv: -kv[1])],
+                "x": [[pos[sid], _sig(buy), _sig(sell), rnd(ret, 4)]
+                      for sid, buy, sell, ret in closed[k]],
             }
-            for m in months
+            for k, m in enumerate(months)
         ],
         "union": union,
         "score": [[int(round(v * 1000)) for v in row] for row in score],
@@ -220,9 +278,19 @@ def build(explore_dir: Path = DEFAULT_DIR, out_dir: Path = DEFAULT_OUT,
 
     data = out_dir / "data"
     sizes: dict[str, int] = {}
+    ticker = uni["ticker"].to_dict()
+    cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    def prices(sid: str) -> tuple[np.ndarray, np.ndarray]:
+        if sid not in cache:
+            adj = filled[sid].ffill().to_numpy(dtype="float64")
+            raw = _raw_close(ticker[sid], dates) if sid in ticker else None
+            cache[sid] = (adj, adj if raw is None else raw)
+        return cache[sid]
+
     exp_list = []
     for exp in EXPERIMENTS:
-        payload = experiment_payload(traces[exp.id], cal_index)
+        payload = experiment_payload(traces[exp.id], cal_index, prices)
         sizes[f"exp/{exp.id}.json"] = _dump(payload, data / "exp" / f"{exp.id}.json")
         exp_list.append({"id": exp.id, "label": exp.label, "note": exp.note})
 
@@ -241,7 +309,6 @@ def build(explore_dir: Path = DEFAULT_DIR, out_dir: Path = DEFAULT_OUT,
         px_dir = data / "px"
         if px_dir.exists():
             shutil.rmtree(px_dir)
-        ticker = uni["ticker"].to_dict()
         total = 0
         for sid in union:
             close = filled[sid].to_numpy(dtype="float64")

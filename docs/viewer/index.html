@@ -311,10 +311,17 @@
 
   @media (max-width: 900px) {
     .app { height: auto; }
-    .main { grid-template-columns: 1fr; }
-    .rank-panel { border-right: 0; border-bottom: 1px solid var(--hairline); max-height: 62vh; }
-    .detail { grid-template-rows: auto auto 62vh auto; }
-    .summary { grid-template-columns: 1fr; }
+    /* one column: experiment results, then the ranking, then the stock */
+    .main { display: flex; flex-direction: column; }
+    .detail { display: contents; }
+    .summary { order: 1; grid-template-columns: 1fr; }
+    .rank-panel { order: 2; border-right: 0; border-bottom: 1px solid var(--hairline); max-height: 62vh; }
+    .stock-head { order: 3; }
+    .chart-wrap { order: 4; height: 62vh; flex: none; }
+    .score-info { order: 5; }
+    /* the button row at the bottom does what these do */
+    .month-bar .icon-btn { display: none; }
+    .month-bar { padding-top: 8px; }
     .mini-wrap { height: 110px; }
     .keys { display: none; }
     .pad {
@@ -326,7 +333,6 @@
       min-width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--hairline);
       background: var(--plane); cursor: pointer; padding: 0 6px;
     }
-    .pad button.txt { font-size: 13px; padding: 0 8px; }
   }
 </style>
 </head>
@@ -346,9 +352,11 @@
   <div class="main">
     <aside class="rank-panel" aria-label="候選排行榜">
       <div class="month-bar">
+        <button class="icon-btn" id="first-month" title="第一次換股（Home）" aria-label="第一次換股">«</button>
         <button class="icon-btn" id="prev-month" title="上一次換股（←）" aria-label="上一次換股">◀</button>
         <div class="month-title" id="month-title"></div>
         <button class="icon-btn" id="next-month" title="下一次換股（→）" aria-label="下一次換股">▶</button>
+        <button class="icon-btn" id="last-month" title="最後一次換股（End）" aria-label="最後一次換股">»</button>
       </div>
       <div class="month-sub" id="month-sub"></div>
       <div class="rank-head"><span>#</span><span>代號</span><span>名稱</span><span>分數</span><span>權重</span><span>狀態</span></div>
@@ -376,13 +384,13 @@
     </section>
   </div>
   <div class="pad" aria-label="操作">
-    <button data-key="Home" class="txt" aria-label="第一次換股">第一月</button>
+    <button data-key="Home" aria-label="第一次換股">«</button>
     <button data-key="ArrowLeft" aria-label="上一次換股">◀</button>
     <button data-key="ArrowUp" aria-label="上一檔">▲</button>
     <button data-key="Enter" aria-label="放大或還原">⤢</button>
     <button data-key="ArrowDown" aria-label="下一檔">▼</button>
     <button data-key="ArrowRight" aria-label="下一次換股">▶</button>
-    <button data-key="End" class="txt" aria-label="最後一次換股">最後月</button>
+    <button data-key="End" aria-label="最後一次換股">»</button>
   </div>
 </div>
 
@@ -710,8 +718,8 @@
       `<span>投入 <b class="num">${pctU(invested, 0)}</b></span>` +
       `<span class="in">新進 ${ins}</span><span class="out">剔除 ${outs}</span>` +
       `<span>過門檻 ${mo.nc}／合格 ${mo.ne}</span>`;
-    $("prev-month").disabled = m === 0;
-    $("next-month").disabled = m === exp.months.length - 1;
+    $("first-month").disabled = $("prev-month").disabled = m === 0;
+    $("last-month").disabled = $("next-month").disabled = m === exp.months.length - 1;
   }
 
   function renderLegend() {
@@ -1424,8 +1432,10 @@
       S.sid = row.dataset.sid;
       update({ list: true, chart: true });
     });
+    $("first-month").onclick = () => setMonth(0);
     $("prev-month").onclick = () => setMonth(S.m - 1);
     $("next-month").onclick = () => setMonth(S.m + 1);
+    $("last-month").onclick = () => setMonth(S.exp.months.length - 1);
     $("help-btn").onclick = () => { $("help").hidden = false; };
     $("help").addEventListener("click", (ev) => { if (ev.target.id === "help") $("help").hidden = true; });
     document.addEventListener("keydown", onKey);

@@ -178,6 +178,12 @@ def cmd_stacked(args: argparse.Namespace) -> int:
     return run_stacked_cli(args)
 
 
+def cmd_seeds(args: argparse.Namespace) -> int:
+    from .seeds import run_seeds_cli
+
+    return run_seeds_cli(args)
+
+
 def cmd_viewer(args: argparse.Namespace) -> int:
     from .viewer_build import run_viewer_cli
 
@@ -251,6 +257,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     w.add_argument("--out", help="output JSON path")
     w.set_defaults(func=cmd_wfcv)
+
+    sd = sub.add_parser("seeds", help="tabulate the WFCV runs of every seed (results/seeds/SUMMARY.md)")
+    sd.add_argument("--results-dir", help="results directory (default results/)")
+    sd.set_defaults(func=cmd_seeds)
 
     r = sub.add_parser("report", help="build the shareable HTML report (docs/index.html)")
     r.add_argument("--result", help="backtest JSON to render (default results/wfcv_monthly.json)")

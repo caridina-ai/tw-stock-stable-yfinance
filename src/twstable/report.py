@@ -30,14 +30,14 @@ import pandas as pd
 from .config import RESULTS_DIR, ROOT
 
 TEMPLATE = Path(__file__).parent / "templates" / "report.html"
-# the production strategy: the walk-forward run with the monthly schedule pinned
-DEFAULT_RESULT = RESULTS_DIR / "wfcv_monthly.json"
+# the production strategy: the walk-forward run whose folds pick their own monthly settings
+DEFAULT_RESULT = RESULTS_DIR / "wfcv_nested.json"
 DEFAULT_OUT = ROOT / "docs" / "index.html"
 
 PAGE_TITLE = "長期穩定上漲股策略 — 二十年 Walk-Forward 實測"
 PAGE_DESC = (
-    "台股「長期穩定上漲」選股策略的 20.8 年 walk-forward 樣本外實測："
-    "每月 24 日換股、最多 12 檔，年化 14.2%、最大回檔 -27.4%，對照大盤 10.0% / -58.3%。"
+    "台股「長期穩定上漲」選股策略的 20.8 年 walk-forward 樣本外實測（事先登記、不看答案）："
+    "年化 15.3%、最大回檔 -34.6%，對照大盤 10.0% / -58.3%；換亂數種子重跑，年化 9.7%–16.9%。"
 )
 
 
@@ -97,6 +97,8 @@ def build_payload(result: dict, freq: str = "W") -> dict:
             "sharpe": f["oos_metrics"]["sharpe"],
             "mdd": f["oos_metrics"]["max_drawdown"],
             "years": f["oos_metrics"]["years"],
+            "day": f.get("params", {}).get("rebalance_day", 0),
+            "m": f.get("params", {}).get("max_m", 0),
         }
         for f in folds
     ]

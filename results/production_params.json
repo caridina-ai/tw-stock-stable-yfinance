@@ -1,24 +1,24 @@
 {
   "score": {
     "window": 500,
-    "g_opt": 1.246853223549986,
-    "g_width": 1.1241923753824805,
-    "sigma0": 0.05722837635631144,
-    "n_sub": 3,
-    "sub_scale": 0.04190551255505501,
-    "z0": 1.1993235549636994,
-    "z_width": 2.5752401209409364
+    "g_opt": 1.2462785332198094,
+    "g_width": 1.2203751244452754,
+    "sigma0": 0.1593996352567577,
+    "n_sub": 4,
+    "sub_scale": 0.097019025722235,
+    "z0": 0.8775603525892923,
+    "z_width": 2.466507270264236
   },
-  "max_m": 12,
-  "rebalance": 10,
-  "rebalance_day": 24,
+  "max_m": 4,
+  "rebalance": 20,
+  "rebalance_day": 25,
   "holiday": "next",
-  "min_score": 0.08582406631750275,
-  "hold_mult": 4.791894827906661,
-  "keep_frac": 0.7055501033080369,
-  "weight_band": 0.15014522885445872,
-  "min_dollar_volume": 10000000.0,
+  "min_score": 0.3493822845981828,
+  "hold_mult": 5.0292265608147275,
+  "keep_frac": 0.5113722382658323,
+  "weight_band": 0.2912878960614025,
+  "min_dollar_volume": 50000000.0,
   "min_price": 5.0,
-  "cap_weight": true,
-  "weighting": "equal"
+  "cap_weight": false,
+  "weighting": "score"
 }

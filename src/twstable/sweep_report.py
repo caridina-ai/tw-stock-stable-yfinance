@@ -532,8 +532,9 @@ def render_summary(s: dict) -> str:
         "",
         "> 本檔由 `python -m twstable sweep-report` 從 `grid.csv` 產生，請勿手改。",
         "> 需求見 [`genesis/FIAT-hyper-parameters.md`](../../genesis/FIAT-hyper-parameters.md)。",
-        "> 本頁的「原上線版參數」是第一次 WFCV（`results/wfcv.json`）那組。採用本頁建議後，"
-        "上線版已改為固定這些設定重跑的 WFCV（`results/wfcv_monthly.json`，見 README 第五節）。",
+        "> 本頁的「原上線版參數」是第一次 WFCV（`results/wfcv.json`）那組。本頁建議的設定後來固定下來重跑 WFCV"
+        "（`results/wfcv_monthly.json`），但這些設定是看過 2006–2026 全期的結果才定的，對那段期間不是樣本外；"
+        "目前的上線版改由每一折自己挑這些設定（`results/wfcv_nested.json`，見 README 第五節）。",
         "",
         "## 結論",
         "",
@@ -577,7 +578,7 @@ def render_summary(s: dict) -> str:
         "",
         "- **walk-forward**：沿用 `results/wfcv.json` 每一折自己的參數，只換掉換股日、假日規則、檔數、"
         "權重上限與權重方式，再把 2006–2026 各折的樣本外曲線串起來。這是比較可信的估計。",
-        "- **原上線版參數**：用 `results/wfcv.json` 的 `production_params`（第一次 WFCV，以 2020–2026 訓練）"
+        "- **原上線版參數**：用 `results/wfcv.json` 的 `production_params`（第一次 WFCV，以 2021-12-28 起的資料訓練）"
         "跑 2001–2026。"
         "2001–2019 對它其實是「往回的樣本外」，所以當作交叉驗證：結論要在兩邊都站得住。",
         "",

@@ -63,17 +63,24 @@ MONTHLY = {"rebalance_day": 24, "holiday": "next", "max_m": 12, "cap_weight": Tr
 EXPERIMENTS: tuple[Experiment, ...] = (
     Experiment(
         "prod", "上線版",
-        "每月 24 日、12 檔、權重上限；其餘參數由 WFCV 逐折重新搜尋。2006 起全部是樣本外。",
+        "每月固定一天換股。換股日、假日規則、檔數（1–20）、權重上限、權重方式與分數參數，"
+        "全部由 WFCV 每一折只用自己的訓練資料挑（results/PREREGISTRATION.md 事先登記）。2006 起全部是樣本外。",
+        "wfcv_nested.json",
+    ),
+    Experiment(
+        "monthly", "看過答案版・24 日 12 檔",
+        "舊上線版：每月 24 日、12 檔、權重上限，是看過 2006–2026 全期的換股日實驗才定的，"
+        "其餘參數由 WFCV 逐折搜尋。這幾個設定對 2006–2026 不是樣本外。",
         "wfcv_monthly.json",
     ),
     Experiment(
-        "prod_nocap", "上線版・無權重上限",
-        "上線版各折參數不變，只關掉權重上限：候選不足 12 檔時把資金平分給剩下的幾檔。",
+        "monthly_nocap", "看過答案版・無權重上限",
+        "看過答案版各折參數不變，只關掉權重上限：候選不足 12 檔時把資金平分給剩下的幾檔。",
         "wfcv_monthly.json", {"cap_weight": False},
     ),
     Experiment(
-        "prod_score", "上線版・分數權重",
-        "上線版各折參數不變，持股權重改為與分數成正比（weighting = score）。",
+        "monthly_score", "看過答案版・分數權重",
+        "看過答案版各折參數不變，持股權重改為與分數成正比（weighting = score）。",
         "wfcv_monthly.json", {"weighting": "score"},
     ),
     Experiment(
@@ -93,7 +100,7 @@ EXPERIMENTS: tuple[Experiment, ...] = (
     ),
     Experiment(
         "prod_full", "上線版參數・全期",
-        "上線版最後一次擬合的參數（production_params.json）從 2001 起全期回測；2020 以後是它的訓練期。",
+        "上線版最後一次擬合的參數（production_params.json）從 2001 起全期回測；2021-12-28 以後是它的訓練期。",
         "production_params.json",
     ),
 )

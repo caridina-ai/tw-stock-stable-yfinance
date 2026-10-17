@@ -48,6 +48,9 @@
 - 設計決定（都寫進 CALLBACK）：分數放在共用 X 軸的子圖、不疊第二 Y 軸；排行榜＝前 50 名合格＋續抱＋本次剔除；
   顏色以「月」計（依日期差 /30.44），所以每 10–60 交易日換股的實驗也適用。
 - **踩過的坑**：`.gitignore` 原本的 `data/` 會連 `docs/viewer/data/` 一起忽略，已改成 `/data/`。
+- 本次剔除的列顯示「買進價→賣出價 報酬」（2026-10-17 使用者要求，數字＋符號、不要文字）：價格是買／賣那天的
+  **原始**收盤（per-symbol parquet 的 `Close`），報酬用還原價、含息、不扣成本；匯出在 `months[].x`（`viewer_build.exits`）。
+  手機上那一格只有約 118 px，10% 以上的報酬取整數才放得下。上線版 752 次平倉、55.6% 賺錢。
 - README 第六節的實驗表有**寫死的數字**（7 列 CAGR／Sharpe／MDD，與 21–41%），重跑 explore 後對照 `explore` 的輸出更新。
 - 測試在瀏覽器端：node 版 Playwright 在 `/opt/node-tools/node_modules/playwright`（Python 版沒裝）；
   `python3 -m http.server -d docs 8765` 後用腳本按鍵、截圖即可（腳本沒進 repo）。

@@ -318,14 +318,15 @@
     .mini-wrap { height: 110px; }
     .keys { display: none; }
     .pad {
-      display: flex; gap: 6px; padding: 6px 16px; justify-content: center;
+      display: flex; gap: 5px; padding: 6px 12px; justify-content: center;
       position: sticky; bottom: 0; background: var(--surface);
       border-top: 1px solid var(--hairline);
     }
     .pad button {
-      min-width: 44px; height: 38px; border-radius: 8px; border: 1px solid var(--hairline);
-      background: var(--plane); cursor: pointer;
+      min-width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--hairline);
+      background: var(--plane); cursor: pointer; padding: 0 6px;
     }
+    .pad button.txt { font-size: 13px; padding: 0 8px; }
   }
 </style>
 </head>
@@ -375,11 +376,13 @@
     </section>
   </div>
   <div class="pad" aria-label="操作">
+    <button data-key="Home" class="txt" aria-label="第一次換股">第一月</button>
     <button data-key="ArrowLeft" aria-label="上一次換股">◀</button>
     <button data-key="ArrowUp" aria-label="上一檔">▲</button>
     <button data-key="Enter" aria-label="放大或還原">⤢</button>
     <button data-key="ArrowDown" aria-label="下一檔">▼</button>
     <button data-key="ArrowRight" aria-label="下一次換股">▶</button>
+    <button data-key="End" class="txt" aria-label="最後一次換股">最後月</button>
   </div>
 </div>
 
